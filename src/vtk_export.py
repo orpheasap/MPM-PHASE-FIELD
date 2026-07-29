@@ -32,6 +32,44 @@ def write_particles_vtp(xp, vp, s, s_dev, eps_p, D, step, t, out_dir):
     return fname
 
 
+def write_particles_vtp_3d(xp, vp, s, step, t, out_dir, eps_p=None, damage=None):
+    """Write one .vtp file for a single 3D MPM time step.
+
+    s is Cauchy stress in Voigt form: [xx, yy, zz, xy, yz, xz].
+    eps_p, damage: optional per-particle scalar fields (plasto-elastic solver).
+    """
+    os.makedirs(out_dir, exist_ok=True)
+
+    cloud = pv.PolyData(np.ascontiguousarray(xp, dtype=float))
+    cloud["velocity"] = np.ascontiguousarray(vp, dtype=float)
+
+    cloud["stress_xx"] = s[:, 0]
+    cloud["stress_yy"] = s[:, 1]
+    cloud["stress_zz"] = s[:, 2]
+    cloud["stress_xy"] = s[:, 3]
+    cloud["stress_yz"] = s[:, 4]
+    cloud["stress_xz"] = s[:, 5]
+
+    # von Mises from the full Cauchy stress tensor
+    sxx, syy, szz = s[:, 0], s[:, 1], s[:, 2]
+    sxy, syz, sxz = s[:, 3], s[:, 4], s[:, 5]
+    cloud["von_mises"] = np.sqrt(
+        0.5 * ((sxx - syy)**2 + (syy - szz)**2 + (szz - sxx)**2)
+        + 3.0 * (sxy**2 + syz**2 + sxz**2)
+    )
+    p = -(sxx + syy + szz) / 3.0
+    cloud["pressure"] = p
+
+    if eps_p is not None:
+        cloud["eps_p"] = np.asarray(eps_p, dtype=float)
+    if damage is not None:
+        cloud["damage"] = np.asarray(damage, dtype=float)
+
+    fname = f"particles_{step:05d}.vtp"
+    cloud.save(os.path.join(out_dir, fname))
+    return fname
+
+
 def write_pvd(out_dir, entries):
     """Write a .pvd collection file linking all time steps for ParaView.
 

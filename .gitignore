@@ -23,6 +23,9 @@
 profile_output.prof
 profile_cmds.txt
 vtk_output/
+vtk_output_bone/
+vtk_output_cylinder/
+vtk_output_ep/
 particle_history.csv
 # Byte-compiled / optimized / DLL files
 __pycache__/
