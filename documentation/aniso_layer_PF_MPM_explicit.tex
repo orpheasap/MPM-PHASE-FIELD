@@ -1,0 +1,904 @@
+% !TEX program = xelatex
+\documentclass[12pt,a4paper]{article}
+\usepackage{fontspec}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{subcaption}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{titlesec}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{algorithmicx}
+\usepackage{breqn}
+\usepackage{bm}
+
+% Set up fonts
+\setmainfont[Ligatures=TeX]{Times New Roman}
+\setsansfont{Arial}
+\setmonofont{Courier New}
+
+% Geometry settings
+\geometry{left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm}
+\usepackage{ragged2e}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{1em}
+
+\emergencystretch=2em
+\justifying
+
+\floatname{algorithm}{Algorithm}
+\renewcommand{\listalgorithmname}{List of Algorithms}
+
+\lstset{
+	language=Matlab,
+	basicstyle=\ttfamily\footnotesize,
+	keywordstyle=\color{blue},
+	commentstyle=\color{green!60!black},
+	numbers=left,
+	numberstyle=\tiny\color{gray},
+	stepnumber=1,
+	numbersep=5pt,
+	backgroundcolor=\color{gray!5},
+	showspaces=false,
+	showstringspaces=false,
+	frame=single,
+	tabsize=2,
+	breaklines=true,
+	captionpos=b
+}
+
+\newcommand{\eng}[1]{#1}
+% ---- Tensor / operator macros ----
+\newcommand{\bF}{\mathbf{F}}
+\newcommand{\bI}{\mathbf{I}}
+\newcommand{\bC}{\mathbf{C}}
+\newcommand{\bsig}{\boldsymbol{\sigma}}
+\newcommand{\beps}{\boldsymbol{\varepsilon}}
+\newcommand{\bxi}{\boldsymbol{\xi}}
+\newcommand{\bu}{\mathbf{u}}
+\newcommand{\bv}{\mathbf{v}}
+\newcommand{\bb}{\mathbf{b}}
+\newcommand{\bn}{\mathbf{n}}
+\newcommand{\bT}{\mathbf{T}}
+\newcommand{\bB}{\mathbf{B}}
+\newcommand{\bN}{\mathbf{N}}
+\newcommand{\bL}{\mathbf{L}}
+\newcommand{\bD}{\mathbf{D}}
+\newcommand{\bK}{\mathbf{K}}
+\newcommand{\bR}{\mathbf{R}}
+\newcommand{\bx}{\mathbf{x}}
+\newcommand{\bP}{\mathbf{P}}
+\newcommand{\bomega}{\boldsymbol{\omega}}
+\newcommand{\Cz}{\mathbf{C}_0}
+\newcommand{\Ca}{\overline{\mathbf{C}}^{\alpha}}     % rotated effective stiffness (global axes)
+\newcommand{\Cp}{\overline{\mathbf{C}}'}             % fitted effective stiffness (layer axes)
+\newcommand{\Cad}{\mathbb{C}(\alpha,d)}              % full damage-dependent stiffness
+\newcommand{\Tsig}{\mathbf{T}_{\!\sigma}}            % Voigt stress rotation matrix
+\DeclareMathOperator{\tr}{tr}
+\DeclareMathOperator{\Div}{div}
+\newcommand{\dd}{\,\mathrm{d}}
+\newcommand{\Dt}{\Delta t}
+
+\titleformat{\chapter}[display]
+{\normalfont\huge\bfseries}{\chaptertitlename\ \thechapter}{20pt}{\Huge}
+
+\algblockdefx[PHASE]{Phase}{EndPhase}[1]{\textbf{#1}}{\textbf{end}}
+
+\begin{document}
+	\setlength{\parindent}{0pt}
+
+	% --- Title page ---
+	\begin{titlepage}
+		\centering
+		{\LARGE\bfseries AN EXPLICIT USL MATERIAL POINT METHOD \\[.3cm]
+		IMPLEMENTATION OF \\[.5cm] ANISOTROPIC TWO--FIELD PHASE--FIELD \\[.3cm]
+		FRACTURE OF 3D--PRINTED LAYERED MATERIALS}\\[2.5cm]
+
+		{\large Technical Report}\\[1cm]
+
+		{\large APOSTOLOPOULOS ORPHEAS}\\[0.5cm]
+		{\large AM: 22030}\\[2.5cm]
+
+		{\large Adapted from the variational anisotropic elastoplastic phase--field\\
+		model of P.~Li, J.~Yvonnet, C.~Combescure, H.~Makich, M.~Nouari\\
+		(\emph{Comput.\ Methods Appl.\ Mech.\ Engrg.}~386 (2021) 114086),\\
+		restricted to linear elasticity and recast as an explicit USL--MPM scheme}\\[2.5cm]
+
+		{\large SCHOOL OF MECHANICAL ENGINEERING}\\
+		{\large NATIONAL TECHNICAL UNIVERSITY OF ATHENS}\\[3cm]
+
+		{\large ATHENS, JUNE 2026}
+	\end{titlepage}
+
+	\tableofcontents
+	\newpage
+
+	% =====================================================================
+	\section{Introduction and Scope}\label{sec:intro}
+
+	This report extends the explicit \emph{Update--Stress--Last} (\eng{USL})
+	Material Point Method (\eng{MPM}) phase--field fracture scheme of the companion
+	report to the \emph{anisotropic, two--field} fracture model of Li \emph{et al.}
+	for 3D printed layered materials. Two scalar damage variables are now carried:
+	a \textbf{bulk layer damage} $d(\bx)\in[0,1]$, which has \emph{no} preferential
+	direction and describes cracking inside the printed layers, and a \textbf{micro
+	interfacial damage} variable $\alpha(\bx)\in[0,1]$, which describes the
+	progressive failure of the weak inter--layer interphases and is therefore
+	intrinsically \emph{anisotropic} (oriented by the layer planes). Both fields
+	$d=0,\alpha=0$ denote intact material; $d=1,\alpha=1$ denote fully broken bulk
+	and fully debonded interphase, respectively.
+
+	Three deliberate simplifications and adaptations are made relative to the
+	source paper:
+	\begin{enumerate}
+		\item \textbf{Linear elasticity only.} The plastic strain energy
+		$\psi^p$, the equivalent plastic strain $p$, the return--mapping algorithm
+		and the von~Mises criterion of the original model are \emph{dropped}.
+		We set $\beps^p=\mathbf{0}$, so that $\beps^e=\beps$ and the elastic energy
+		is simply $\psi^e=\tfrac12\beps:\Cad:\beps$.
+		\item \textbf{Homogenisation taken as given.} The construction of the
+		effective interphase stiffness by computational homogenisation
+		(Section~3 of the source paper) is taken for granted. We use directly the
+		\emph{fitted} effective matrix $\Cp(\alpha)$ (the matrix form of
+		$\overline{\mathbb{C}}^{\alpha}(\alpha)$ in the layer basis), in the
+		quadratic form $\overline{C}'_{ij}(\alpha)=a_1^{ij}+a_2^{ij}(1-\alpha)^2$.
+		\item \textbf{Explicit, dissipative phase fields.} Exactly as in the
+		companion report, each elliptic damage stationarity condition is turned into
+		a parabolic (Allen--Cahn type) evolution law by adding a dissipative
+		micro--force. Here \emph{two} viscosities are introduced, $\eta_d$ and
+		$\eta_\alpha$, so that \emph{both} $d$ and $\alpha$ can be marched forward in
+		time by an explicit forward--Euler update on lumped pseudo--masses, in
+		lock--step with the explicit momentum update.
+	\end{enumerate}
+
+	The report is organised as follows.
+	Section~\ref{sec:vars} defines the two damage fields, the layer orientation and
+	the projector. Section~\ref{sec:energy} gives the energy density and the
+	damage--dependent constitutive law. Section~\ref{sec:rotation} works through the
+	rotation of the fitted stiffness $\Cp(\alpha)$ by the layer angle $\theta$ and
+	the construction of the anisotropic gradient tensor $\bomega^{\alpha}$.
+	Section~\ref{sec:strong} adds the two dissipative micro--forces and derives the
+	coupled strong forms. Section~\ref{sec:disc} treats irreversibility (history
+	$\mathcal{H}$ for $d$, pointwise max for $\alpha$), the weak forms and the
+	\emph{explicit nodal updates} of $d$ and $\alpha$. Section~\ref{sec:algo}
+	embeds the two updates in the explicit \eng{USL--MPM} cycle and states the
+	complete algorithm. Section~\ref{sec:cfl} derives the \emph{three} time--step
+	limits: the elastodynamic CFL of the momentum update and the two parabolic
+	limits of the $d$ and $\alpha$ updates.
+
+	% =====================================================================
+	\section{Damage variables and layer kinematics}\label{sec:vars}
+
+	Consider a layered solid occupying a domain $\Omega\subset\mathbb{R}^2$ (plane
+	stress assumed throughout, consistent with the fitted plane--stress stiffness
+	below) with boundary $\partial\Omega=\partial\Omega_u\cup\partial\Omega_F$,
+	$\partial\Omega_u\cap\partial\Omega_F=\emptyset$. Displacements $\bar{\bu}$ are
+	prescribed on $\partial\Omega_u$ and tractions $\bar{\bF}$ on
+	$\partial\Omega_F$. All layers are assumed parallel. The mechanical state is
+	described by the displacement $\bu(\bx)$, the bulk layer damage $d(\bx)$ and the
+	micro interfacial damage $\alpha(\bx)$.
+
+	\paragraph{Layer orientation and projector.}
+	Let $\theta$ be the angle between the layer direction $\mathbf{e}'_1$ and the
+	global axis $\mathbf{e}_1$ (Fig.~3(a)--(b) of the source paper). The orthonormal
+	\emph{layer frame} is
+	\begin{equation}\label{eq:layerframe}
+		\mathbf{e}'_1 \;=\; \begin{bmatrix}\cos\theta\\[1pt]\sin\theta\end{bmatrix},
+		\qquad
+		\mathbf{e}'_2 \;=\; \bn^{\alpha} \;=\; \begin{bmatrix}-\sin\theta\\[1pt]\cos\theta\end{bmatrix},
+	\end{equation}
+	where $\bn^{\alpha}=\mathbf{e}'_2$ is the unit normal to the layers (the normal
+	of the weak planes). The micro interfacial cracks are constrained to run
+	\emph{along} the layers, i.e.\ perpendicular to $\bn^{\alpha}$. We define the
+	projector onto the layer plane,
+	\begin{equation}\label{eq:projector}
+		\bP^{\alpha} \;=\; \bI - \bn^{\alpha}\!\otimes\bn^{\alpha} \;=\; \mathbf{e}'_1\!\otimes\mathbf{e}'_1,
+	\end{equation}
+	so that $\mathbf{v}=\bP^{\alpha}\bu$ is the projection of $\bu$ onto
+	$\mathbf{e}'_1$. In components, with $c=\cos\theta$, $s=\sin\theta$,
+	\begin{equation}\label{eq:Pcomp}
+		\bn^{\alpha}\!\otimes\bn^{\alpha}
+		=\begin{bmatrix} s^2 & -sc\\ -sc & c^2\end{bmatrix},
+		\qquad
+		\bP^{\alpha}
+		=\begin{bmatrix} c^2 & sc\\ sc & s^2\end{bmatrix}.
+	\end{equation}
+
+	% =====================================================================
+	\section{Energy density and damage--dependent constitutive law}\label{sec:energy}
+
+	In the absence of body forces and plasticity, the total energy of the cracked
+	structure is
+	\begin{equation}\label{eq:W}
+		W \;=\; \int_{\Omega}\bigl(\psi^e + \psi^d + \psi^{\alpha}\bigr)\dd\Omega
+		\;-\; \int_{\partial\Omega_F}\bar{\bF}\cdot\bu\,\dd S,
+	\end{equation}
+	where $\psi^e$ is the elastic strain energy density, $\psi^d$ is the bulk layer
+	fracture energy density and $\psi^{\alpha}$ is the micro interfacial fracture
+	energy density.
+
+	\paragraph{Elastic energy and stress.}
+	With $\beps=\tfrac12(\nabla\bu+\nabla\bu^{T})$ the (small) strain and
+	$\beps^e=\beps$ (linear elasticity),
+	\begin{equation}\label{eq:psie}
+		\psi^e \;=\; \tfrac12\,\beps:\Cad:\beps,
+		\qquad
+		\Cad \;=\; g(d)\,\Ca(\alpha),
+		\qquad
+		g(d)=(1-d)^2 .
+	\end{equation}
+	Here $\Ca(\alpha)$ is the effective (homogenised) elasticity tensor of the
+	interphase, expressed in the global axes, obtained by rotating the fitted
+	stiffness $\Cp(\alpha)$ (layer axes) by the layer angle $\theta$
+	(Section~\ref{sec:rotation}). The Cauchy stress is
+	\begin{equation}\label{eq:stress}
+		\bsig \;=\; \frac{\partial\psi^e}{\partial\beps}
+		\;=\; g(d)\,\Ca(\alpha):\beps
+		\;=\; g(d)\,\bsig_0,
+		\qquad
+		\bsig_0 \equiv \Ca(\alpha):\beps .
+	\end{equation}
+	The stress is thus degraded by the bulk damage through $g(d)=(1-d)^2$, while the
+	interfacial damage $\alpha$ enters through the $\alpha$--dependence (and
+	$\theta$--rotation) of the effective stiffness $\Ca(\alpha)$.
+
+	\paragraph{Bulk fracture energy (isotropic, AT2--type).}
+	The bulk layer crack surface density and its energy are
+	\begin{equation}\label{eq:gammad}
+		\psi^d \;=\; g_c^{\,d}\,\gamma^d(d),
+		\qquad
+		\gamma^d(d) \;=\; \frac{d^2}{2\ell_d} \;+\; \frac{\ell_d}{2}\,\nabla d\cdot\nabla d,
+	\end{equation}
+	with $g_c^{\,d}$ the bulk fracture toughness and $\ell_d$ the bulk length scale.
+	The crack density is \emph{isotropic} (no preferred direction), consistent with
+	bulk cracking inside the layers.
+
+	\paragraph{Interfacial fracture energy (anisotropic).}
+	The micro interfacial crack surface density is made directional through the
+	structural tensor $\bomega^{\alpha}$,
+	\begin{equation}\label{eq:gammaa}
+		\psi^{\alpha} \;=\; g_c^{\,\alpha}\,\gamma^{\alpha}(\alpha),
+		\qquad
+		\gamma^{\alpha}(\alpha) \;=\; \frac{\alpha^2}{2\ell_\alpha}
+		\;+\; \frac{\ell_\alpha}{2}\,\bomega^{\alpha}\!:(\nabla\alpha\otimes\nabla\alpha),
+	\end{equation}
+	with $g_c^{\,\alpha}$ the interfacial toughness, $\ell_\alpha$ the interfacial
+	length scale, and
+	\begin{equation}\label{eq:omegaa}
+		\bomega^{\alpha} \;=\; \bI \;+\; \xi^{\alpha}\,\bP^{\alpha},
+		\qquad \xi^{\alpha}\gg 1 .
+	\end{equation}
+	The scalar $\xi^{\alpha}\gg1$ heavily penalises the gradient of $\alpha$ in the
+	direction $\mathbf{e}'_1$ \emph{normal to} $\bn^{\alpha}$, i.e.\ along the
+	layers; this forces $\alpha$ to vary slowly along the layer and rapidly across
+	it, so that interfacial cracks smear into thin bands aligned with the weak
+	planes. The quadratic form $\bomega^{\alpha}\!:(\nabla\alpha\otimes\nabla\alpha)=
+	\nabla\alpha\cdot\bomega^{\alpha}\nabla\alpha$ is the anisotropic counterpart of
+	$|\nabla\alpha|^2$.
+
+	Following the source paper, the length scales are tied to the minimal element
+	(cell) size $h_e$ via $\ell_d=\ell_\alpha=2h_e$, although they may also be
+	regarded as material parameters.
+
+	% =====================================================================
+	\section{\texorpdfstring{Rotation of $\Cp(\alpha)$ and construction of $\bomega^{\alpha}$ at angle $\theta$}{Rotation of C'(alpha) and construction of omega-alpha at angle theta}}\label{sec:rotation}
+
+	This section is the core ``geometry'' of the anisotropic model: how the fitted
+	interphase stiffness and the gradient tensor, both naturally expressed in the
+	layer frame $(\mathbf{e}'_1,\mathbf{e}'_2)$, are mapped to the global frame
+	$(\mathbf{e}_1,\mathbf{e}_2)$ for a layer set inclined at angle $\theta$.
+
+	\subsection{The fitted effective stiffness in the layer frame}
+
+	Taken as given from the computational homogenisation, the effective stiffness in
+	the layer (primed) basis is the plane--stress $3\times3$ Voigt matrix, fitted by
+	a quadratic in $(1-\alpha)$,
+	\begin{equation}\label{eq:Cpfit}
+		\overline{C}'_{ij}(\alpha) \;=\; a_1^{ij} \;+\; a_2^{ij}\,(1-\alpha)^2,
+		\qquad
+		\Cp(\alpha) \;=\;
+		\begin{bmatrix}
+			\overline{C}'_{11} & \overline{C}'_{12} & 0\\[2pt]
+			\overline{C}'_{12} & \overline{C}'_{22} & 0\\[2pt]
+			0 & 0 & \overline{C}'_{33}
+		\end{bmatrix},
+	\end{equation}
+	in Voigt order $\{11,22,12\}$ with engineering shear $\gamma_{12}=2\varepsilon_{12}$.
+	The quadratic form is chosen precisely so that the interfacial damage problem
+	remains \emph{linear} in $\alpha$ (the driving term is linear in $\alpha$, see
+	Section~\ref{sec:strong}). As a concrete numerical instantiation, the straight
+	interphase RVE of the source paper that was conducted for $E=10GPa\ ,\ \nu=.25$ yields:
+	\begin{equation}\label{eq:Cp78}
+		\Cp(\alpha) \;=\;\frac{E}{1-\nu^2}
+		\begin{bmatrix}
+			.8437 + .1563(1-\alpha)^2 & \nu(1-\alpha)^2 & 0\\[2pt]
+			\nu(1-\alpha)^2 & (1-\alpha)^2 & 0\\[2pt]
+			0 & 0 & \frac{1-\nu}{2}(1-\alpha)^2
+		\end{bmatrix}\ \text{[GPa]},
+	\end{equation}
+	i.e.\ $a_1^{11}=.8437\frac{E}{1-\nu^2}$, $a_2^{11}=.1563\frac{E}{1-\nu^2}$, $a_1^{12}=a_1^{22}=a_1^{33}=0$,
+	$a_2^{12}=\nu\frac{E}{1-\nu^2}$, $a_2^{22}=\frac{E}{1-\nu^2}$, $a_2^{33}=\frac{1-\nu}{2}\frac{E}{1-\nu^2}$ (GPa). Note that
+	$\overline{C}'_{12},\overline{C}'_{22},\overline{C}'_{33}\to0$ as $\alpha\to1$
+	(complete loss of transverse/shear stiffness across a fully damaged interphase),
+	while $\overline{C}'_{11}\to a_1^{11}\neq0$ (the layer keeps an in--plane
+	longitudinal stiffness). Its $\alpha$--derivative, needed for the interfacial
+	driving force, is
+	\begin{equation}\label{eq:dCp}
+		\frac{\partial\Cp}{\partial\alpha} \;=\;
+		\begin{bmatrix}
+			-2a_2^{11}(1-\alpha) & -2a_2^{12}(1-\alpha) & 0\\[2pt]
+			-2a_2^{12}(1-\alpha) & -2a_2^{22}(1-\alpha) & 0\\[2pt]
+			0 & 0 & -2a_2^{33}(1-\alpha)
+		\end{bmatrix}
+		\;=\; -2(1-\alpha)\,\mathbf{A}_2,
+	\end{equation}
+	where $\mathbf{A}_2$ collects the quadratic coefficients $a_2^{ij}$.
+	$\partial\Cp/\partial\alpha$ is negative semi--definite, so degradation of the
+	interphase releases energy that drives $\alpha\to1$.
+
+	\subsection{Voigt rotation to the global frame}
+
+	The fourth--order rotation $\overline{C}^{\alpha}_{ijkl}=R_{ip}R_{jq}R_{kr}R_{ls}
+	\overline{C}'_{pqrs}$ of the source paper (eq.~57), with the in--plane rotation
+	$\mathbf{R}(\theta)=\bigl[\begin{smallmatrix}c&-s\\ s&c\end{smallmatrix}\bigr]$,
+	is implemented in Voigt matrix form as a congruence transformation. Define the
+	\emph{stress} Voigt rotation matrix
+	\begin{equation}\label{eq:Tsig}
+		\Tsig(\theta) \;=\;
+		\begin{bmatrix}
+			c^2 & s^2 & -2cs\\[2pt]
+			s^2 & c^2 & \phantom{-}2cs\\[2pt]
+			cs & -cs & c^2-s^2
+		\end{bmatrix},
+		\qquad c=\cos\theta,\; s=\sin\theta,
+	\end{equation}
+	which maps a stress vector from the layer frame to the global frame,
+	$[\bsig]_{\text{glob}}=\Tsig[\bsig]_{\text{layer}}$. The corresponding
+	\emph{strain} (engineering) Voigt rotation is
+	$\mathbf{T}_\varepsilon(\theta)=\bigl[\begin{smallmatrix}
+	c^2&s^2&-cs\\ s^2&c^2&cs\\ 2cs&-2cs&c^2-s^2\end{smallmatrix}\bigr]$, and the two
+	satisfy the identity $\mathbf{T}_\varepsilon^{-1}(\theta)=\Tsig^{T}(\theta)$.
+	Since $[\bsig]_{\text{glob}}=\Tsig[\bsig]_{\text{layer}}
+	=\Tsig\,\Cp\,[\beps]_{\text{layer}}
+	=\Tsig\,\Cp\,\mathbf{T}_\varepsilon^{-1}[\beps]_{\text{glob}}$, the effective
+	stiffness in the global frame is the congruence
+	\begin{equation}\label{eq:Carot}
+		\boxed{\;\Ca(\alpha,\theta) \;=\; \Tsig(\theta)\,\Cp(\alpha)\,\Tsig^{T}(\theta)\;.}
+	\end{equation}
+	This matrix identity is exactly equivalent to the index expression (eq.~57 of
+	the paper) and is the form used in the code: rotate the fitted layer--frame
+	matrix once per $\theta$, then it depends on $\alpha$ only through the scalar
+	$(1-\alpha)^2$ multipliers inside $\Cp$. Likewise
+	\begin{equation}\label{eq:dCarot}
+		\frac{\partial\Ca}{\partial\alpha}(\alpha,\theta)
+		\;=\; \Tsig(\theta)\,\frac{\partial\Cp}{\partial\alpha}\,\Tsig^{T}(\theta)
+		\;=\; -2(1-\alpha)\,\Tsig(\theta)\,\mathbf{A}_2\,\Tsig^{T}(\theta).
+	\end{equation}
+
+	\paragraph{Worked component expansion.}
+	Carrying out the product~\eqref{eq:Carot} for the structure of~\eqref{eq:Cpfit}
+	(with $\overline{C}'_{13}=\overline{C}'_{23}=0$) gives the global components
+	\begin{align}
+		\overline{C}^{\alpha}_{11} &= c^4\overline{C}'_{11} + s^4\overline{C}'_{22}
+		+ 2c^2s^2\overline{C}'_{12} + 4c^2s^2\overline{C}'_{33}, \label{eq:Cglob11}\\
+		\overline{C}^{\alpha}_{22} &= s^4\overline{C}'_{11} + c^4\overline{C}'_{22}
+		+ 2c^2s^2\overline{C}'_{12} + 4c^2s^2\overline{C}'_{33}, \label{eq:Cglob22}\\
+		\overline{C}^{\alpha}_{12} &= c^2s^2\overline{C}'_{11} + c^2s^2\overline{C}'_{22}
+		+ (c^4+s^4)\overline{C}'_{12} - 4c^2s^2\overline{C}'_{33}, \label{eq:Cglob12}\\
+		\overline{C}^{\alpha}_{33} &= c^2s^2\overline{C}'_{11} + c^2s^2\overline{C}'_{22}
+		- 2c^2s^2\overline{C}'_{12} + (c^2-s^2)^2\overline{C}'_{33}, \label{eq:Cglob33}\\
+		\overline{C}^{\alpha}_{13} &= cs\bigl[\,c^2\overline{C}'_{11}
+		- s^2\overline{C}'_{22} - (c^2-s^2)\overline{C}'_{12}
+		- 2(c^2-s^2)\overline{C}'_{33}\,\bigr], \label{eq:Cglob13}\\
+		\overline{C}^{\alpha}_{23} &= cs\bigl[\,s^2\overline{C}'_{11}
+		- c^2\overline{C}'_{22} + (c^2-s^2)\overline{C}'_{12}
+		+ 2(c^2-s^2)\overline{C}'_{33}\,\bigr]. \label{eq:Cglob23}
+	\end{align}
+	The off--diagonal coupling terms $\overline{C}^{\alpha}_{13},
+	\overline{C}^{\alpha}_{23}$ (normal--shear coupling) vanish at $\theta=0$ and
+	$\theta=90^\circ$ but are nonzero for inclined layers, which is the origin of
+	the orientation--dependent response. (For implementation one simply forms the
+	$3\times3$ product~\eqref{eq:Carot} numerically; the expansion is given to make
+	the anisotropy explicit.)
+
+	\subsection{\texorpdfstring{The gradient tensor $\bomega^{\alpha}$ at angle $\theta$}{The gradient tensor omega-alpha at angle theta}}
+
+	The structural tensor follows directly from the
+	projector~\eqref{eq:Pcomp}. Substituting $\bP^{\alpha}$
+	into~\eqref{eq:omegaa},
+	\begin{equation}\label{eq:omega_theta}
+		\boxed{\;
+		\bomega^{\alpha}(\theta) \;=\; \bI + \xi^{\alpha}\bP^{\alpha}
+		\;=\;
+		\begin{bmatrix}
+			1+\xi^{\alpha}c^2 & \xi^{\alpha}cs\\[2pt]
+			\xi^{\alpha}cs & 1+\xi^{\alpha}s^2
+		\end{bmatrix}\;.}
+	\end{equation}
+	Its eigenpairs are transparent: $\bomega^{\alpha}\mathbf{e}'_1=(1+\xi^{\alpha})\mathbf{e}'_1$
+	and $\bomega^{\alpha}\bn^{\alpha}=1\cdot\bn^{\alpha}$, i.e.\ the eigenvalue
+	$1+\xi^{\alpha}$ acts along the layer direction $\mathbf{e}'_1$ and the
+	eigenvalue $1$ acts across the layers along $\bn^{\alpha}$. The anisotropic
+	gradient energy is then
+	\begin{equation}\label{eq:gradenergy}
+		\bomega^{\alpha}\!:(\nabla\alpha\otimes\nabla\alpha)
+		= \nabla\alpha\cdot\bomega^{\alpha}\nabla\alpha
+		= |\nabla\alpha|^2 + \xi^{\alpha}\bigl(\mathbf{e}'_1\cdot\nabla\alpha\bigr)^2 ,
+	\end{equation}
+	so the cost of a gradient of $\alpha$ along the layer ($\mathbf{e}'_1\cdot\nabla\alpha$)
+	is amplified by $(1+\xi^{\alpha})$. Two limiting orientations check the algebra:
+	\begin{equation}
+		\theta=0^\circ:\;\bomega^{\alpha}=\!\begin{bmatrix}1+\xi^{\alpha}&0\\0&1\end{bmatrix}\!,
+		\qquad
+		\theta=90^\circ:\;\bomega^{\alpha}=\!\begin{bmatrix}1&0\\0&1+\xi^{\alpha}\end{bmatrix}\!,
+	\end{equation}
+	consistent with layers aligned with $\mathbf{e}_1$ and $\mathbf{e}_2$,
+	respectively. The divergence of the associated flux, needed below, is
+	\begin{equation}\label{eq:omega_div}
+		\bomega^{\alpha}\!:\nabla\nabla\alpha
+		\;=\; \nabla\cdot\!\bigl(\bomega^{\alpha}\nabla\alpha\bigr)
+		\;=\; (1+\xi^{\alpha}c^2)\,\alpha_{,11}
+		+ 2\xi^{\alpha}cs\,\alpha_{,12}
+		+ (1+\xi^{\alpha}s^2)\,\alpha_{,22},
+	\end{equation}
+	(for spatially uniform $\theta$, so $\bomega^{\alpha}$ is constant in $\bx$).
+
+	% =====================================================================
+	\section{Coupled strong forms with two dissipative micro--forces}\label{sec:strong}
+
+	\subsection{Energetic micro--stresses}
+
+	From the energy density~\eqref{eq:W} with~\eqref{eq:psie}--\eqref{eq:omegaa},
+	the energetic scalar micro--stresses conjugate to $d$ and $\alpha$, and the
+	corresponding micro--stress vectors, are
+	\begin{align}
+		\omega_{\mathrm{en}}^{d} &= \frac{\partial\psi}{\partial d}
+		= g'(d)\,\psi_0^{e} + \frac{g_c^{\,d}}{\ell_d}\,d,
+		& \bxi^{d} &= \frac{\partial\psi}{\partial\nabla d} = g_c^{\,d}\ell_d\,\nabla d, \label{eq:micd}\\[4pt]
+		\omega_{\mathrm{en}}^{\alpha} &= \frac{\partial\psi}{\partial\alpha}
+		= \tfrac12 g(d)\,\beps:\frac{\partial\Ca}{\partial\alpha}:\beps
+		+ \frac{g_c^{\,\alpha}}{\ell_\alpha}\,\alpha,
+		& \bxi^{\alpha} &= \frac{\partial\psi}{\partial\nabla\alpha}
+		= g_c^{\,\alpha}\ell_\alpha\,\bomega^{\alpha}\nabla\alpha, \label{eq:mica}
+	\end{align}
+	where $\psi_0^{e}=\tfrac12\beps:\Ca(\alpha):\beps$ is the elastic energy density
+	evaluated with the (bulk--undamaged) effective stiffness, and
+	$g'(d)=-2(1-d)$.
+
+	\subsection{Dissipative micro--forces and rate balances}
+
+	Exactly as in the companion report, each phase--field balance
+	$\nabla\cdot\bxi^{(\cdot)}-\omega^{(\cdot)}=0$ is rendered \emph{parabolic} by
+	letting the scalar micro--stress possess a dissipative part proportional to the
+	rate of the corresponding field,
+	\begin{equation}\label{eq:diss}
+		\omega^{d} = \omega_{\mathrm{en}}^{d} + \eta_d\,\dot d,
+		\qquad
+		\omega^{\alpha} = \omega_{\mathrm{en}}^{\alpha} + \eta_\alpha\,\dot\alpha,
+		\qquad \eta_d,\eta_\alpha\ge 0,
+	\end{equation}
+	with viscosities $\eta_d,\eta_\alpha$ (units $\mathrm{Pa\cdot s}$). Each
+	dissipative term satisfies the dissipation inequality
+	($\eta_d\dot d^2\ge0$, $\eta_\alpha\dot\alpha^2\ge0$) and vanishes in the
+	quasi--static limit. Substituting~\eqref{eq:micd}--\eqref{eq:diss} into the two
+	balances gives the rate forms
+	\begin{align}
+		\eta_d\,\dot d &= \nabla\cdot\bxi^{d} - \omega_{\mathrm{en}}^{d}
+		= g_c^{\,d}\ell_d\,\nabla^2 d - \frac{g_c^{\,d}}{\ell_d}\,d + 2(1-d)\,\mathcal{H}, \label{eq:rate_d}\\[4pt]
+		\eta_\alpha\,\dot\alpha &= \nabla\cdot\bxi^{\alpha} - \omega_{\mathrm{en}}^{\alpha}
+		= g_c^{\,\alpha}\ell_\alpha\,\bomega^{\alpha}\!:\nabla\nabla\alpha
+		- \frac{g_c^{\,\alpha}}{\ell_\alpha}\,\alpha
+		- \tfrac12 g(d)\,\beps:\frac{\partial\Ca}{\partial\alpha}:\beps, \label{eq:rate_a}
+	\end{align}
+	where in~\eqref{eq:rate_d} the elastic driving energy $\psi_0^{e}$ has been
+	replaced by the irreversible history field $\mathcal{H}$ (Section~\ref{sec:disc}).
+	Equations~\eqref{eq:rate_d}--\eqref{eq:rate_a} are two Allen--Cahn type evolution
+	laws, integrable by explicit forward Euler.
+
+	\paragraph{Sign of the interfacial driving force.}
+	Since $\partial\Ca/\partial\alpha=-2(1-\alpha)\,\Tsig\mathbf{A}_2\Tsig^{T}$ is
+	negative semi--definite, the last term in~\eqref{eq:rate_a} is non--negative and
+	\emph{drives} $\alpha$ upward. It is convenient to define the interfacial crack
+	driving energy
+	\begin{equation}\label{eq:Galpha}
+		\mathcal{G}^{\alpha} \;:=\; -\tfrac12 g(d)\,\beps:\frac{\partial\Ca}{\partial\alpha}:\beps
+		\;=\; (1-\alpha)\,g(d)\,\beps:\bigl(\Tsig\mathbf{A}_2\Tsig^{T}\bigr):\beps \;\ge 0,
+	\end{equation}
+	the $\alpha$--analogue of the elastic driving energy in the $d$--equation.
+
+	\subsection{Summary of the coupled strong form}
+
+	The complete coupled initial/boundary--value problem is
+	\begin{subequations}\label{eq:strongall}
+	\begin{align}
+		\rho\,\dot{\bv} &= \nabla\cdot\bigl[g(d)\,\Ca(\alpha):\beps\bigr] + \rho\,\bb,
+			& &\text{(momentum)} \label{eq:strong_mom}\\[2pt]
+		\eta_d\,\dot d &= g_c^{\,d}\ell_d\,\nabla^2 d - \tfrac{g_c^{\,d}}{\ell_d}d + 2(1-d)\mathcal{H},
+			& &\text{(bulk damage)} \label{eq:strong_d}\\[2pt]
+		\eta_\alpha\,\dot\alpha &= g_c^{\,\alpha}\ell_\alpha\,\bomega^{\alpha}\!:\!\nabla\nabla\alpha
+			- \tfrac{g_c^{\,\alpha}}{\ell_\alpha}\alpha + \mathcal{G}^{\alpha},
+			& &\text{(interfacial damage)} \label{eq:strong_a}\\[2pt]
+		\bsig\cdot\bn &= \bar{\bF},\quad
+			\nabla d\cdot\bn=0,\quad \bomega^{\alpha}\nabla\alpha\cdot\bn=0,
+			& &\text{(boundary)} \label{eq:strong_bc}
+	\end{align}
+	\end{subequations}
+	coupled through (i) $g(d)$, which degrades the stress; (ii) $\Ca(\alpha)$, whose
+	$\alpha$--degradation softens the stress and supplies $\mathcal{H}$; and
+	(iii) $\mathcal{G}^{\alpha}$, through which the elastic state and the bulk damage
+	$g(d)$ drive the interface. In the quasi--static limit $\eta_d,\eta_\alpha\to0$,
+	\eqref{eq:strong_d}--\eqref{eq:strong_a} collapse to the stationarity conditions
+	(eqs.~41 and 44 of the source paper, with $\beps^e=\beps$).
+
+	% =====================================================================
+	\section{Discretisation and explicit nodal updates}\label{sec:disc}
+
+	\subsection{Irreversibility}
+
+	Both damage fields must be non--decreasing, $\dot d\ge0$, $\dot\alpha\ge0$.
+
+	\paragraph{Bulk damage: history field.}
+	As specified, $d$ is driven by a monotone history field that records the maximum
+	elastic energy density attained, evaluated with the $\alpha$--degraded effective
+	stiffness,
+	\begin{equation}\label{eq:history}
+		\mathcal{H} \;=\; \max_{\tau\in[0,t]}\psi_0^{e}(\tau),
+		\qquad
+		\psi_0^{e} \;=\; \tfrac12\,\beps:\Ca(\alpha):\beps,
+	\end{equation}
+	with $\dot{\mathcal{H}}\ge0$, $\psi_0^{e}-\mathcal{H}\le0$,
+	$\dot{\mathcal{H}}(\psi_0^{e}-\mathcal{H})=0$. This is the $\mathcal{H}$ used
+	in~\eqref{eq:strong_d}.
+
+	\paragraph{Interfacial damage: pointwise maximum.}
+	Following the source paper (its eq.~15), irreversibility of $\alpha$ is enforced
+	by a pointwise maximum applied after the explicit update,
+	\begin{equation}\label{eq:airrev}
+		\alpha^{\,t+\Dt} \;\leftarrow\; \max\bigl(\alpha^{\,t},\,\alpha^{\,t+\Dt}_{\mathrm{trial}}\bigr),
+	\end{equation}
+	where $\alpha^{\,t+\Dt}_{\mathrm{trial}}$ is the value produced by the explicit
+	evolution~\eqref{eq:strong_a}.
+
+	\subsection{Weak forms}
+
+	With test functions $\delta d$, $\delta\alpha$ and the natural boundary
+	conditions~\eqref{eq:strong_bc}, multiplying~\eqref{eq:rate_d}--\eqref{eq:rate_a}
+	and integrating by parts over the reference domain $\Omega_0$ gives
+	\begin{align}
+		\int_{\Omega_0}\!\Bigl\{\eta_d\dot d\,\delta d
+		+ \tfrac{g_c^{\,d}}{\ell_d}d\,\delta d
+		+ g_c^{\,d}\ell_d\,\nabla d\!\cdot\!\nabla\delta d
+		- 2(1-d)\mathcal{H}\,\delta d\Bigr\}\dd V &= 0, \label{eq:weak_d}\\[4pt]
+		\int_{\Omega_0}\!\Bigl\{\eta_\alpha\dot\alpha\,\delta\alpha
+		+ \tfrac{g_c^{\,\alpha}}{\ell_\alpha}\alpha\,\delta\alpha
+		+ g_c^{\,\alpha}\ell_\alpha\,(\bomega^{\alpha}\nabla\alpha)\!\cdot\!\nabla\delta\alpha
+		+ \tfrac12 g(d)\beps\!:\!\tfrac{\partial\Ca}{\partial\alpha}\!:\!\beps\,\delta\alpha\Bigr\}\dd V &= 0. \label{eq:weak_a}
+	\end{align}
+	In each, the first term is the new dissipative contribution; the rest is the
+	energetic residual of the original quasi--static formulation. (For reference, the
+	implicit tangent of the $\alpha$--problem is linear in $\alpha$ precisely because
+	$\partial\Ca/\partial\alpha\propto(1-\alpha)$ and the gradient term is linear;
+	this is the reason for the quadratic fit~\eqref{eq:Cpfit}.)
+
+	\subsection{Spatial discretisation and explicit updates}
+
+	Displacement and both damage fields share the MPM background--grid shape
+	functions $N_I$, with $\bB_I=\nabla N_I$:
+	\begin{equation}\label{eq:interp}
+		d=\sum_I N_I\hat d_I,\quad \alpha=\sum_I N_I\hat\alpha_I,\quad
+		\nabla d=\sum_I\bB_I\hat d_I,\quad \nabla\alpha=\sum_I\bB_I\hat\alpha_I.
+	\end{equation}
+	Discretising the rates by forward Euler,
+	$\dot d\approx(d_I^{t+\Dt}-d_I^{t})/\Dt$,
+	$\dot\alpha\approx(\alpha_I^{t+\Dt}-\alpha_I^{t})/\Dt$, and lumping the viscous
+	terms onto the diagonal pseudo--masses
+	\begin{equation}\label{eq:pseudomass}
+		m_I^{d}=m_I^{\alpha}=\int_{\Omega_0}N_I\dd V \;\xrightarrow{\text{MPM}}\;
+		\sum_p N_I(\bx_p)\,V_p^0,
+	\end{equation}
+	the two nodal balances solve explicitly. Writing the \emph{energetic} nodal
+	residuals as
+	\begin{align}
+		F_I^{d} &= \int_{\Omega_0}\!\Bigl\{\tfrac{g_c^{\,d}}{\ell_d}d^{t}N_I
+		+ g_c^{\,d}\ell_d\,\bB_I\!\cdot\!\nabla d^{t}
+		- 2(1-d^{t})N_I\,\mathcal{H}\Bigr\}\dd V, \label{eq:Fd}\\[4pt]
+		F_I^{\alpha} &= \int_{\Omega_0}\!\Bigl\{\tfrac{g_c^{\,\alpha}}{\ell_\alpha}\alpha^{t}N_I
+		+ g_c^{\,\alpha}\ell_\alpha\,\bB_I\!\cdot\!(\bomega^{\alpha}\nabla\alpha^{t})
+		+ \tfrac12 g(d^{t})\,\beps\!:\!\tfrac{\partial\Ca}{\partial\alpha}\!:\!\beps\,N_I\Bigr\}\dd V, \label{eq:Fa}
+	\end{align}
+	the explicit nodal updates are
+	\begin{equation}\label{eq:nodal_update}
+		\boxed{\;
+		d_I^{\,t+\Dt}=d_I^{t}-\frac{\Dt}{\eta_d\,m_I^{d}}F_I^{d},
+		\qquad
+		\alpha_I^{\,t+\Dt}=\alpha_I^{t}-\frac{\Dt}{\eta_\alpha\,m_I^{\alpha}}F_I^{\alpha}\;.}
+	\end{equation}
+	In MPM (particle) quadrature, $\int_{\Omega_0}(\cdot)\dd V\approx\sum_p(\cdot)_p V_p^0$,
+	so the fully discrete updates read
+	\begin{align}
+		d_I^{\,t+\Dt} &= d_I^{t}-\frac{\Dt}{\eta_d m_I^{d}}\sum_p\Bigl[
+		\tfrac{g_c^{\,d}}{\ell_d}d_p^{t}N_I(\bx_p)
+		+ g_c^{\,d}\ell_d\,\nabla N_I(\bx_p)\!\cdot\!\nabla d^{t}
+		- 2(1-d_p^{t})N_I(\bx_p)\mathcal{H}_p\Bigr]V_p^0, \label{eq:dupd_mpm}\\[4pt]
+		\alpha_I^{\,t+\Dt} &= \alpha_I^{t}-\frac{\Dt}{\eta_\alpha m_I^{\alpha}}\sum_p\Bigl[
+		\tfrac{g_c^{\,\alpha}}{\ell_\alpha}\alpha_p^{t}N_I(\bx_p)
+		+ g_c^{\,\alpha}\ell_\alpha\,\nabla N_I(\bx_p)\!\cdot\!\bomega^{\alpha}\nabla\alpha^{t}
+		- \mathcal{G}^{\alpha}_p N_I(\bx_p)\Bigr]V_p^0, \label{eq:aupd_mpm}
+	\end{align}
+	with $d_p^{t}=\sum_I N_I(\bx_p)d_I^{t}$, $\nabla d^{t}=\sum_I\nabla N_I(\bx_p)d_I^{t}$
+	(and analogously for $\alpha$), $\mathcal{H}_p$ the particle history,
+	and $\mathcal{G}^{\alpha}_p=(1-\alpha_p^{t})g(d_p^{t})\beps_p:(\Tsig\mathbf{A}_2\Tsig^{T}):\beps_p$
+	the particle interfacial driving energy~\eqref{eq:Galpha}. After the grid
+	updates, the particle fields are recovered by mapping back,
+	$d_p^{t+\Dt}=\sum_I N_I d_I^{t+\Dt}$,
+	$\alpha_p^{t+\Dt}=\sum_I N_I \alpha_I^{t+\Dt}$, and irreversibility is enforced
+	pointwise: $d_p^{t+\Dt}\!\leftarrow\!\max(d_p^{t},d_p^{t+\Dt})$,
+	$\alpha_p^{t+\Dt}\!\leftarrow\!\max(\alpha_p^{t},\alpha_p^{t+\Dt})$.
+
+	\subsection{Higher--order fits of $\Cp(\alpha)$ enabled by the explicit scheme}\label{sec:hofit}
+
+	In the implicit formulation of the source paper the interfacial damage problem
+	is assembled as the linear system $\bK_\alpha\boldsymbol{\alpha}+\mathbf{F}_\alpha(\boldsymbol{\alpha})=\mathbf 0$
+	(its eq.~72), with $\bK_\alpha$ constant and
+	\begin{equation}\label{eq:Falpha_impl}
+		\mathbf F_\alpha(\boldsymbol\alpha)=\int_{\Omega}\tfrac12 g(d)\,\beps:\frac{\partial\Ca}{\partial\alpha}:\beps\,\bN^{T}\dd\Omega .
+	\end{equation}
+	This system is linear in $\alpha$ \emph{only if} $\partial\Ca/\partial\alpha$ is
+	affine in $\alpha$, which is precisely what forces the quadratic fit
+	$\overline C'_{ij}=a_1^{ij}+a_2^{ij}(1-\alpha)^2$, so that
+	$\partial\overline C'_{ij}/\partial\alpha=-2a_2^{ij}(1-\alpha)$. As the paper
+	notes, the quadratic fit is accurate only for $\chi\approx10$; for other $\chi$ a
+	higher--order fit is needed, but that would render eq.~72 \emph{nonlinear},
+	requiring Newton iteration and explicit box constraints to enforce
+	$0\le\alpha\le1$ --- a development it defers to future work.
+
+	\textbf{The explicit scheme removes this restriction entirely.} The interfacial
+	field is not obtained from a linear (or any) solve: it is marched by the
+	forward--Euler update~\eqref{eq:nodal_update}/\eqref{eq:aupd_mpm}, in which the
+	nodal force $F_I^\alpha$ is \emph{evaluated at the known state} $\alpha^t$. No
+	tangent is assembled or inverted, so the dependence of $\partial\Ca/\partial\alpha$
+	on $\alpha$ may be of arbitrary polynomial order (indeed any smooth function):
+	the nonlinearity is simply lagged by one step, exactly as the nonlinear terms
+	$g'(d)\mathcal H$ (and, for AT1/AT2, the crack--density derivatives) are already
+	handled explicitly in the $d$--update. A general fit of order $n_f$,
+	\begin{equation}\label{eq:genfit}
+		\overline C'_{ij}(\alpha)=\sum_{k=0}^{n_f} a_k^{ij}(1-\alpha)^k,
+		\qquad
+		\frac{\partial\overline C'_{ij}}{\partial\alpha}=-\sum_{k=1}^{n_f} k\,a_k^{ij}(1-\alpha)^{k-1},
+	\end{equation}
+	may therefore be used to reproduce the homogenised curves at \emph{any} $\chi$
+	(the paper's $\chi=10$, quadratic case is $n_f=2$). The rotation is unchanged,
+	$\Ca=\Tsig\Cp\Tsig^{T}$ and
+	$\partial_\alpha\Ca=\Tsig(\partial_\alpha\Cp)\Tsig^{T}$, and the interfacial
+	driving energy generalises to
+	\begin{equation}\label{eq:Ggen}
+		\mathcal G^\alpha=-\tfrac12 g(d)\,\beps:\frac{\partial\Ca}{\partial\alpha}:\beps
+		=\tfrac12 g(d)\,\beps:\Bigl[\Tsig\Bigl(\textstyle\sum_{k=1}^{n_f}k\,\mathbf A_k(1-\alpha)^{k-1}\Bigr)\Tsig^{T}\Bigr]:\beps,
+	\end{equation}
+	with $\mathbf A_k$ the matrix of coefficients $a_k^{ij}$; the quadratic case
+	$n_f=2$ recovers $\mathcal G^\alpha=(1-\alpha)g(d)\,\beps:(\Tsig\mathbf A_2\Tsig^{T}):\beps$
+	of~\eqref{eq:Galpha}.
+
+	The box constraint $0\le\alpha\le1$ --- which in the implicit nonlinear setting
+	would demand a constrained (bound--limited) solver --- is here enforced trivially
+	by clamping the marched value together with the irreversibility maximum,
+	\begin{equation}\label{eq:clamp}
+		\alpha_p^{t+\Dt}\;\leftarrow\;\min\!\Bigl(\max\bigl(\alpha_p^{t},\,\alpha_{p,\mathrm{trial}}^{t+\Dt}\bigr),\,1\Bigr).
+	\end{equation}
+	The only new numerical consideration is a source--term stability limit discussed
+	in Section~\ref{sec:cfl}; the diffusion and reaction operators
+	$\bK_\alpha$ are unchanged by the fit order, so the anisotropic diffusion
+	limit~\eqref{eq:cfl_a} is unaffected.
+
+	% =====================================================================
+	\section{Total solution algorithm: explicit USL--MPM with two phase fields}\label{sec:algo}
+
+	The two damage updates are advanced inside the same P2G/G2P machinery as the
+	momentum problem. Each material point $p$ carries
+	$\bx_p,\bv_p,\bsig_p,\bF_p,V_p^0,V_p,m_p,\rho_p$, the two damage fields
+	$d_p,\alpha_p$, the history $\mathcal{H}_p$, and the (fixed) layer angle
+	$\theta$ defining $\Ca(\alpha,\theta),\partial\Ca/\partial\alpha,\bomega^{\alpha}$.
+	In USL, stresses are updated \emph{last}, after the grid momenta have been
+	advanced and mapped back.
+
+	\begin{algorithm}[H]
+		\caption{Explicit USL--MPM with two--field anisotropic phase--field fracture}
+		\label{alg:uslmpm_pf2}
+		\begin{algorithmic}[1]
+			\State \textbf{Initialisation:} Cartesian grid; $t\!\leftarrow\!0$; precompute
+			$\Ca(\alpha,\theta)$, $\partial\Ca/\partial\alpha$, $\bomega^{\alpha}(\theta)$ from
+			$\Cp(\alpha)$, $\Tsig(\theta)$, $\bP^{\alpha}$ \Comment{Eqs.~\eqref{eq:Carot},\eqref{eq:dCarot},\eqref{eq:omega_theta}}
+			\State Particle data: $\bx_p^0,\bv_p^0,\bsig_p^0,\bF_p^0,V_p^0,m_p,\rho_p^0,d_p^0,\alpha_p^0,\mathcal{H}_p^0$
+			\While{$t<t_f$}
+				\State \textbf{Reset grid:} $m_I,(m\bv)_I,\mathbf{f}_I^{\mathrm{ext}},\mathbf{f}_I^{\mathrm{int}},\,m_I^{d},m_I^{\alpha},F_I^{d},F_I^{\alpha}\leftarrow 0$
+				\Phase{Particle$\,\to\,$grid (P2G)}
+					\State $m_I^{t}=\sum_p N_I m_p$;\quad $(m\bv)_I^{t}=\sum_p N_I (m\bv)_p$
+					\State $\mathbf{f}_I^{\mathrm{ext},t}=\sum_p N_I m_p\bb$;\quad
+					$\mathbf{f}_I^{\mathrm{int},t}=-\sum_p V_p^{t}\bsig_p^{t}\nabla N_I$ \Comment{$\bsig_p^t=g(d_p^t)\Ca(\alpha_p^t)\!:\!\beps_p^t$}
+					\State $\mathbf{f}_I^{t}=\mathbf{f}_I^{\mathrm{ext},t}+\mathbf{f}_I^{\mathrm{int},t}$
+					\State Pseudo--masses: $m_I^{d}=m_I^{\alpha}=\sum_p N_I V_p^0$
+					\State Bulk damage force $F_I^{d}=\sum_p\bigl[\tfrac{g_c^{d}}{\ell_d}d_p^t N_I+g_c^{d}\ell_d\nabla N_I\!\cdot\!\nabla d^t-2(1-d_p^t)N_I\mathcal{H}_p^t\bigr]V_p^0$
+					\State Interf.\ damage force $F_I^{\alpha}=\sum_p\bigl[\tfrac{g_c^{\alpha}}{\ell_\alpha}\alpha_p^t N_I+g_c^{\alpha}\ell_\alpha\nabla N_I\!\cdot\!\bomega^{\alpha}\nabla\alpha^t-\mathcal{G}^{\alpha}_p N_I\bigr]V_p^0$
+				\EndPhase
+				\State \textbf{Update momenta:} $(m\bv)_I^{t+\Dt}=(m\bv)_I^{t}+\mathbf{f}_I^{t}\Dt$
+				\State \textbf{Update bulk damage:} $d_I^{t+\Dt}=d_I^{t}-\dfrac{\Dt}{\eta_d m_I^{d}}F_I^{d}$
+				\State \textbf{Update interfacial damage:} $\alpha_I^{t+\Dt}=\alpha_I^{t}-\dfrac{\Dt}{\eta_\alpha m_I^{\alpha}}F_I^{\alpha}$
+				\State \textbf{Boundary conditions:} fix $(m\bv)_I$ on $\partial\Omega_u$; prescribe $d_I,\alpha_I$ on damage--BC nodes
+				\Phase{Grid$\,\to\,$particle (G2P)}
+					\State $\bv_I^{t}=(m\bv)_I^{t}/m_I^{t}$,\quad $\bv_I^{t+\Dt}=(m\bv)_I^{t+\Dt}/m_I^{t}$
+					\State Particle velocity (PIC/FLIP): $\bv_p^{t+\Dt}=\beta(\bv_p^{t}+\sum_I N_I[\bv_I^{t+\Dt}-\bv_I^{t}])+(1-\beta)\sum_I N_I\bv_I^{t+\Dt}$
+					\State Particle position: $\bx_p^{t+\Dt}=\bx_p^{t}+\Dt\sum_I N_I\bv_I^{t+\Dt}$
+					\State Map damage: $d_p^{t+\Dt}=\sum_I N_I d_I^{t+\Dt}$,\quad $\alpha_p^{t+\Dt}=\sum_I N_I\alpha_I^{t+\Dt}$
+					\State Enforce irreversibility: $d_p^{t+\Dt}\!\leftarrow\!\max(d_p^t,d_p^{t+\Dt})$,\;\; $\alpha_p^{t+\Dt}\!\leftarrow\!\max(\alpha_p^t,\alpha_p^{t+\Dt})$
+					\State $\bL_p^{t+\Dt}=\sum_I\nabla N_I\bv_I^{t+\Dt}$;\;\;
+					$\bF_p^{t+\Dt}=(\bI+\bL_p^{t+\Dt}\Dt)\bF_p^{t}$;\;\; $V_p^{t+\Dt}=\det(\bF_p^{t+\Dt})V_p^0$
+					\State $\bD_p^{t+\Dt}=\tfrac12(\bL_p^{t+\Dt}+\bL_p^{t+\Dt\,T})$;\;\; $\Delta\beps_p=\Dt\,\bD_p^{t+\Dt}$;\;\; $\beps_p^{t+\Dt}=\beps_p^{t}+\Delta\beps_p$
+					\State \textbf{Update stress (last):} $\bsig_{0,p}^{t+\Dt}=\Ca(\alpha_p^{t+\Dt},\theta)\!:\!\beps_p^{t+\Dt}$;\;\; $\bsig_p^{t+\Dt}=g(d_p^{t+\Dt})\bsig_{0,p}^{t+\Dt}$
+					\State \textbf{Update history:} $\psi^e_{0,p}=\tfrac12\beps_p^{t+\Dt}\!:\!\Ca(\alpha_p^{t+\Dt})\!:\!\beps_p^{t+\Dt}$;\;\; $\mathcal{H}_p^{t+\Dt}=\max(\mathcal{H}_p^t,\psi^e_{0,p})$
+				\EndPhase
+				\State \textbf{Advance time:} $t\leftarrow t+\Dt$
+			\EndWhile
+		\end{algorithmic}
+	\end{algorithm}
+
+	Lines new relative to the single--field scheme are: the precomputation of the
+	rotated tensors (line~1), the two pseudo--masses and \emph{two} damage forces in
+	P2G (lines~10--11), the two explicit grid updates (lines~14--15), the two
+	particle damage / irreversibility updates in G2P (lines~21--22), and the use of
+	the $\alpha$--dependent, $\theta$--rotated stiffness in the stress and history
+	updates (lines~25--26).
+
+	% =====================================================================
+	\section{Three explicit time--step (stability) limits}\label{sec:cfl}
+
+	Three conditionally stable explicit updates run simultaneously; the global step
+	must respect the smallest of the three limits,
+	\begin{equation}\label{eq:dtmin}
+		\Dt \;=\; \mathrm{SF}\cdot\min\bigl(\Dt^{\,u}_{\mathrm{crit}},\,\Dt^{\,d}_{\mathrm{crit}},\,\Dt^{\,\alpha}_{\mathrm{crit}}\bigr),
+		\qquad 0<\mathrm{SF}\le1,
+	\end{equation}
+	with $\mathrm{SF}$ a safety factor and $h$ the background cell size.
+
+	\paragraph{(1) Elastodynamic CFL --- momentum update~\eqref{eq:strong_mom}.}
+	The momentum update is limited by the Courant--Friedrichs--Lewy condition
+	\begin{equation}\label{eq:cfl_u}
+		\boxed{\;\Dt^{\,u}_{\mathrm{crit}} \;=\; \frac{h}{c_d},
+		\qquad c_d=\sqrt{\frac{C_{\max}}{\rho}}\;,}
+	\end{equation}
+	where $c_d$ is the fastest (dilatational) wave speed. For the anisotropic,
+	damage--degraded material the conservative choice is
+	$C_{\max}=\max_i\lambda_i\!\bigl(g(d)\Ca(\alpha,\theta)\bigr)$, the largest
+	eigenvalue of the current stiffness matrix; for an undamaged isotropic estimate
+	this reduces to $c_d=\sqrt{(\lambda+2\mu)/\rho}$. Because $g(d)\Ca\le\Ca(0)$, the
+	intact stiffness gives a safe upper bound on $c_d$.
+
+	\paragraph{(2) Bulk--damage diffusion limit --- update~\eqref{eq:strong_d}.}
+	Equation~\eqref{eq:strong_d} is a reaction--diffusion equation with isotropic
+	diffusivity $D_d=g_c^{\,d}\ell_d/\eta_d$. The forward--Euler stability of the
+	diffusion operator on a grid of spacing $h$ in $n$ space dimensions requires
+	\begin{equation}\label{eq:cfl_d}
+		\boxed{\;\Dt^{\,d}_{\mathrm{crit}} \;=\; \frac{h^2}{2nD_d}
+		\;=\; \frac{\eta_d\,h^2}{2\,n\,g_c^{\,d}\,\ell_d}\;,}
+		\qquad (n=2:\;\Dt^{\,d}_{\mathrm{crit}}=\eta_d h^2/4g_c^{\,d}\ell_d).
+	\end{equation}
+	(The reaction term $g_c^{\,d}d/\ell_d$ adds the milder restriction
+	$\Dt\le2\eta_d\ell_d/g_c^{\,d}$, normally non--binding since $\ell_d\sim h$.)
+
+	\paragraph{(3) Interfacial--damage anisotropic diffusion limit --- update~\eqref{eq:strong_a}.}
+	Equation~\eqref{eq:strong_a} is an \emph{anisotropic} reaction--diffusion
+	equation with diffusion tensor
+	$\mathbf{D}^{\alpha}=(g_c^{\,\alpha}\ell_\alpha/\eta_\alpha)\,\bomega^{\alpha}$.
+	Its largest eigenvalue is set by the penalised (along--layer) direction,
+	$\lambda_{\max}(\bomega^{\alpha})=1+\xi^{\alpha}$, so the stability is governed by
+	\begin{equation}\label{eq:cfl_a}
+		\boxed{\;\Dt^{\,\alpha}_{\mathrm{crit}} \;=\; \frac{h^2}{2nD^{\alpha}_{\max}}
+		\;=\; \frac{\eta_\alpha\,h^2}{2\,n\,g_c^{\,\alpha}\,\ell_\alpha\,(1+\xi^{\alpha})}\;,}
+		\qquad D^{\alpha}_{\max}=\frac{g_c^{\,\alpha}\ell_\alpha(1+\xi^{\alpha})}{\eta_\alpha}.
+	\end{equation}
+	The factor $(1+\xi^{\alpha})$ is the key consequence of the anisotropic gradient
+	penalty: with $\xi^{\alpha}\gg1$ (e.g.\ $\xi^{\alpha}=30$) the interfacial
+	update is roughly $(1+\xi^{\alpha})$ times more restrictive than an isotropic one
+	at equal $\eta,g_c,\ell$.
+
+	\paragraph{Source--term (reaction) limit for higher--order fits.}
+	When a higher--order fit~\eqref{eq:genfit} ($n_f>2$) is used
+	(Section~\ref{sec:hofit}), the interfacial source $\mathcal G^{\alpha}(\alpha)$
+	is nonlinear in $\alpha$, and the forward--Euler integration of the reaction part
+	imposes the additional restriction
+	\begin{equation}\label{eq:cfl_react}
+		\Dt \;\le\; \frac{2\,\eta_\alpha}{|r_\alpha|},
+		\qquad
+		r_\alpha = -\frac{g_c^{\,\alpha}}{\ell_\alpha}
+		- \tfrac12 g(d)\,\beps:\frac{\partial^2\Ca}{\partial\alpha^2}:\beps,
+		\qquad
+		\frac{\partial^2\overline C'_{ij}}{\partial\alpha^2}=\sum_{k=2}^{n_f}k(k-1)a_k^{ij}(1-\alpha)^{k-2},
+	\end{equation}
+	where $r_\alpha=\partial_\alpha(\mathcal G^{\alpha}-g_c^{\,\alpha}\alpha/\ell_\alpha)$
+	is the local reaction rate. For the quadratic fit
+	$\partial^2\Ca/\partial\alpha^2=2\,\Tsig\mathbf A_2\Tsig^{T}$ is \emph{constant},
+	so this limit is mild and $\alpha$--independent; higher orders make it
+	$\alpha$--dependent but it is normally dominated by the anisotropic diffusion
+	limit~\eqref{eq:cfl_a} (amplified by $1+\xi^{\alpha}$). The interfacial critical
+	step in~\eqref{eq:dtmin} is thus taken as
+	$\Dt^{\,\alpha}_{\mathrm{crit}}=\min(\Dt^{\,\alpha}_{\mathrm{diff}},\,\Dt^{\,\alpha}_{\mathrm{react}})$,
+	with the diffusion value~\eqref{eq:cfl_a} governing in practice.
+
+	\paragraph{Choosing the viscosities.}
+	As in the single--field scheme, $\eta_d$ and $\eta_\alpha$ are chosen large
+	enough that the parabolic limits do not undercut the elastodynamic CFL, so the
+	momentum condition governs and all three fields march with the same $\Dt$:
+	\begin{equation}\label{eq:eta_choice}
+		\eta_d \;\gtrsim\; \frac{2n\,g_c^{\,d}\ell_d}{h^2}\,\Dt^{\,u}_{\mathrm{crit}}
+		= \frac{2n\,g_c^{\,d}\ell_d}{h\,c_d},
+		\qquad
+		\eta_\alpha \;\gtrsim\; \frac{2n\,g_c^{\,\alpha}\ell_\alpha(1+\xi^{\alpha})}{h^2}\,\Dt^{\,u}_{\mathrm{crit}}
+		= \frac{2n\,g_c^{\,\alpha}\ell_\alpha(1+\xi^{\alpha})}{h\,c_d}.
+	\end{equation}
+	The viscosities must nonetheless remain small enough not to retard the physical
+	crack speeds artificially; since $\omega_{\mathrm{diss}}=\eta\dot{(\cdot)}\to0$ as
+	the rates vanish, the converged ($\dot d=\dot\alpha=0$) crack patterns coincide
+	with the equilibrium solutions of the original quasi--static variational model,
+	independently of $\eta_d,\eta_\alpha$. Note that $\eta_\alpha$ generally needs to
+	be larger than $\eta_d$ by the factor $(1+\xi^{\alpha})$ to keep the same step.
+
+	% =====================================================================
+	\section{Summary}\label{sec:summary}
+
+	The single--field explicit USL--MPM phase--field scheme of the companion report
+	was extended to the anisotropic, two--field model of Li \emph{et al.}, restricted
+	to linear elasticity. Two damage variables are carried: an isotropic bulk layer
+	damage $d$ with AT2 crack density~\eqref{eq:gammad}, and an anisotropic micro
+	interfacial damage $\alpha$ with the directional crack density~\eqref{eq:gammaa}
+	built on $\bomega^{\alpha}=\bI+\xi^{\alpha}\bP^{\alpha}$. The homogenised
+	interphase stiffness was taken as the fitted quadratic $\Cp(\alpha)$ and rotated
+	to global axes by the layer angle $\theta$ through the Voigt congruence
+	$\Ca=\Tsig\Cp\Tsig^{T}$~\eqref{eq:Carot}, with $\bomega^{\alpha}(\theta)$ given in
+	closed form by~\eqref{eq:omega_theta}. Two dissipative micro--forces,
+	$\eta_d\dot d$ and $\eta_\alpha\dot\alpha$, turn the two elliptic stationarity
+	conditions into parabolic evolution laws~\eqref{eq:strong_d}--\eqref{eq:strong_a},
+	each integrated by an explicit forward--Euler update on a lumped
+	pseudo--mass~\eqref{eq:nodal_update}. Bulk damage is driven by the monotone
+	history field $\mathcal{H}=\max\tfrac12\beps:\Ca(\alpha):\beps$; interfacial
+	damage by $\mathcal{G}^{\alpha}=-\tfrac12 g(d)\beps:\partial_\alpha\Ca:\beps$ with
+	pointwise--max irreversibility. The whole was embedded in the explicit USL cycle
+	(Algorithm~\ref{alg:uslmpm_pf2}) subject to the combined three--way step
+	restriction~\eqref{eq:dtmin}, comprising the elastodynamic
+	CFL~\eqref{eq:cfl_u}, the bulk diffusion limit~\eqref{eq:cfl_d}, and the
+	anisotropy--amplified interfacial diffusion limit~\eqref{eq:cfl_a}.
+
+	% =====================================================================
+	\begin{thebibliography}{9}
+
+	\bibitem{li2021aniso}
+	P.\ Li, J.\ Yvonnet, C.\ Combescure, H.\ Makich, M.\ Nouari,
+	Anisotropic elastoplastic phase field fracture modeling of 3D printed materials.
+	\textit{Computer Methods in Applied Mechanics and Engineering}, 386:114086, 2021.\\
+	\href{https://doi.org/10.1016/j.cma.2021.114086}{https://doi.org/10.1016/j.cma.2021.114086}
+
+	\bibitem{nguyen2023mpm}
+	V.P.\ Nguyen, A.\ de Vaucorbeil, S.\ Bordas,
+	\textit{The Material Point Method: Theory, Implementations and Applications}.
+	Springer, Scientific Computation, 2023.\\
+	\href{https://doi.org/10.1007/978-3-031-24070-6}{https://doi.org/10.1007/978-3-031-24070-6}
+
+	\bibitem{hu2023explicit}
+	Z.\ Hu, Z.\ Zhang, X.\ Zhou, X.\ Cui, H.\ Ye,
+	Explicit phase-field material point method with the convected particle domain interpolation for impact/contact fracture in elastoplastic geomaterials.
+	\textit{Computer Methods in Applied Mechanics and Engineering}, 405:115851, 2023.\\
+	\href{https://doi.org/10.1016/j.cma.2022.115851}{https://doi.org/10.1016/j.cma.2022.115851}
+
+	\bibitem{kristensen2021pff}
+	P.K.\ Kristensen, C.F.\ Niordson, E.\ Mart\'inez-Pa\~neda,
+	An assessment of phase field fracture: crack initiation and growth.
+	\textit{Philosophical Transactions of the Royal Society A}, 379(2203):20210021, 2021.\\
+	\href{https://doi.org/10.1098/rsta.2021.0021}{https://doi.org/10.1098/rsta.2021.0021}
+
+	\end{thebibliography}
+
+\end{document}

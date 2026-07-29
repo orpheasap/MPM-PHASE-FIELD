@@ -1,0 +1,669 @@
+% !TEX program = xelatex
+\documentclass[12pt,a4paper]{article}
+\usepackage{fontspec}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{subcaption}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{titlesec}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{algorithmicx}
+\usepackage{breqn}
+\usepackage{bm}
+
+% Set up fonts
+\setmainfont[Ligatures=TeX]{Times New Roman}
+\setsansfont{Arial}
+\setmonofont{Courier New}
+
+% Geometry settings
+\geometry{left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm}
+\usepackage{ragged2e}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{1em}
+
+\emergencystretch=2em
+\justifying
+
+\floatname{algorithm}{Algorithm}
+\renewcommand{\listalgorithmname}{List of Algorithms}
+
+\lstset{
+	language=Matlab,
+	basicstyle=\ttfamily\footnotesize,
+	keywordstyle=\color{blue},
+	commentstyle=\color{green!60!black},
+	numbers=left,
+	numberstyle=\tiny\color{gray},
+	stepnumber=1,
+	numbersep=5pt,
+	backgroundcolor=\color{gray!5},
+	showspaces=false,
+	showstringspaces=false,
+	frame=single,
+	tabsize=2,
+	breaklines=true,
+	captionpos=b
+}
+
+\newcommand{\eng}[1]{#1}
+% ---- Tensor / operator macros ----
+\newcommand{\bF}{\mathbf{F}}
+\newcommand{\bI}{\mathbf{I}}
+\newcommand{\bC}{\mathbf{C}}
+\newcommand{\bsig}{\boldsymbol{\sigma}}
+\newcommand{\beps}{\boldsymbol{\varepsilon}}
+\newcommand{\bxi}{\boldsymbol{\xi}}
+\newcommand{\bu}{\mathbf{u}}
+\newcommand{\bv}{\mathbf{v}}
+\newcommand{\bb}{\mathbf{b}}
+\newcommand{\bn}{\mathbf{n}}
+\newcommand{\bT}{\mathbf{T}}
+\newcommand{\bB}{\mathbf{B}}
+\newcommand{\bN}{\mathbf{N}}
+\newcommand{\bL}{\mathbf{L}}
+\newcommand{\bD}{\mathbf{D}}
+\newcommand{\bK}{\mathbf{K}}
+\newcommand{\bR}{\mathbf{R}}
+\newcommand{\bx}{\mathbf{x}}
+\newcommand{\Cz}{\mathbf{C}_0}
+\DeclareMathOperator{\tr}{tr}
+\DeclareMathOperator{\Div}{div}
+\newcommand{\dd}{\,\mathrm{d}}
+\newcommand{\Dt}{\Delta t}
+
+\titleformat{\chapter}[display]
+{\normalfont\huge\bfseries}{\chaptertitlename\ \thechapter}{20pt}{\Huge}
+
+\algblockdefx[PHASE]{Phase}{EndPhase}[1]{\textbf{#1}}{\textbf{end}}
+
+\begin{document}
+	\setlength{\parindent}{0pt}
+
+	% --- Title page ---
+	\begin{titlepage}
+		\centering
+		{\LARGE\bfseries AN EXPLICIT USL MATERIAL POINT METHOD \\[.3cm]
+		IMPLEMENTATION OF \\[.5cm] VARIATIONAL PHASE--FIELD FRACTURE}\\[3cm]
+
+		{\large Technical Report}\\[1cm]
+
+		{\large APOSTOLOPOULOS ORPHEAS}\\[0.5cm]
+		{\large AM: 22030}\\[3cm]
+
+		{\large SCHOOL OF MECHANICAL ENGINEERING}\\
+		{\large NATIONAL TECHNICAL UNIVERSITY OF ATHENS}\\[5cm]
+
+		{\large ATHENS, JUNE 2026}
+	\end{titlepage}
+
+	\tableofcontents
+	\newpage
+
+	% =====================================================================
+	\section{Introduction and Scope}
+
+	This report develops an \emph{explicit} solution scheme for variational
+	phase--field fracture, formulated within the \emph{Update--Stress--Last}
+	(\eng{USL}) Material Point Method (\eng{MPM}). The continuum phase--field
+	theory is adopted essentially unchanged from the variational fracture
+	framework summarised below, and the same symbols are retained throughout:
+	the displacement field $\bu$, the scalar phase field (damage variable)
+	$\phi\in[0,1]$, the degradation function $g(\phi)$, the crack surface density
+	function $\gamma(\phi,\nabla\phi)$, the fracture toughness $G_c$, the length
+	scale $\ell$, the normalisation constant $c_w$, the local crack geometry
+	function $w(\phi)$, the (undamaged) elastic strain energy density $\psi^e$, and
+	the history field $\mathcal{H}$.
+
+	The original framework is intrinsically \emph{quasi--static}: the scalar
+	micro--stress $\omega$ that is work conjugate to $\phi$ is purely
+	\emph{energetic}, so the phase--field balance~$\nabla\cdot\bxi-\omega=0$ is an
+	\emph{elliptic} equation that must be solved by an implicit (monolithic or
+	staggered) Newton iteration at every time step. This is incompatible with an
+	explicit MPM time integrator, in which all unknowns are marched forward in
+	time without solving a linear system.
+
+	\textbf{The central modification of this report} is the introduction of a
+	\emph{dissipative} contribution to the phase--field micro--stress,
+	\begin{equation}\label{eq:wdiss_intro}
+		\boxed{\;\omega_{\mathrm{diss}} \;=\; \eta\,\dot{\phi} \;=\; \eta\,\frac{\dd\phi}{\dd t}\;,\qquad \eta\ge 0,\;}
+	\end{equation}
+	where $\eta$ is a (artificial) viscosity with units of
+	$\mathrm{Pa\cdot s}$. As shown by Kakouris \& Triantafyllou and by Cheon \&
+	Kim, this single term turns the damage sub--problem from an \emph{elliptic}
+	into a \emph{parabolic} (Allen--Cahn type) equation, so the phase field can be
+	advanced in time by an explicit forward--Euler update on a lumped pseudo--mass,
+	exactly in the spirit of the explicit momentum update of the displacement
+	problem. The result is a fully explicit, monolithic--in--time
+	\eng{USL--MPM} algorithm in which displacement and phase field are updated
+	within the \emph{same} time loop.
+
+	The report is organised as follows. Section~\ref{sec:reg} recalls the
+	phase--field regularisation of Griffith fracture. Section~\ref{sec:vw} restates
+	the principle of virtual work, now augmented with the dissipative
+	micro--force~\eqref{eq:wdiss_intro}, and derives the strong forms.
+	Section~\ref{sec:const} gives the constitutive theory and the AT1/AT2 crack
+	density choices. Section~\ref{sec:strong} collects the coupled strong forms,
+	emphasising the parabolic nature of the regularised evolution law.
+	Section~\ref{sec:disc} treats damage irreversibility, the weak form and the
+	MPM space discretisation, and derives the \emph{explicit nodal phase--field
+	update}. Finally, Section~\ref{sec:algo} embeds this update into the explicit
+	\eng{USL--MPM} cycle and states the complete solution algorithm, followed by
+	stability and time--step considerations.
+
+	% =====================================================================
+	\section{Phase--field Regularisation of Griffith Fracture}\label{sec:reg}
+
+	Consider a solid of volume $V$ occupying a domain $\Omega\subset\mathbb{R}^n$
+	($n\in\{1,2,3\}$) with external boundary $\partial\Omega$ and outward unit
+	normal $\bn$. The elastic strain energy density of the undamaged solid is
+	$\psi^e(\beps)$, a function of the (small) strain tensor $\beps$.
+
+	Griffith's energy balance states that the variation of the total energy $\Pi$
+	with respect to an incremental increase of the crack area $\dd A$ vanishes,
+	\begin{equation}\label{eq:griffith_dPi}
+		\frac{\dd\Pi}{\dd A} \;=\; \frac{\dd\psi^e(\beps)}{\dd A} \;+\; \frac{\dd W_c}{\dd A} \;=\; 0,
+	\end{equation}
+	where $W_c$ is the work required to create new surfaces and
+	$G_c=\dd W_c/\dd A$ is the critical energy release rate. In variational form,
+	\begin{equation}\label{eq:griffith_var}
+		\Pi \;=\; \int_{\Omega}\psi^e(\beps)\dd V \;+\; \int_{\Gamma}G_c\dd\Gamma,
+	\end{equation}
+	with $\Gamma$ the (unknown) crack surface. The difficulty posed by the unknown
+	$\Gamma$ is removed by introducing an auxiliary phase field $\phi$ that smears
+	the sharp interface into a diffuse region: $\phi=0$ in intact material and
+	$\phi=1$ in fully cracked material. The Griffith functional is then approximated
+	by the regularised functional
+	\begin{equation}\label{eq:Pi_ell}
+		\Pi_\ell \;=\; \int_{\Omega}\bigl[\,g(\phi)\,\psi^e_0(\beps) \;+\; G_c\,\gamma(\phi,\ell)\,\bigr]\dd V,
+	\end{equation}
+	where $\ell$ is a length scale governing the size of the fracture process zone,
+	$\psi^e_0$ is the elastic energy density of the undamaged solid, and
+	$\gamma(\phi,\ell)$ is the crack surface density function. The degradation
+	function $g(\phi)$ degrades the stiffness as $\phi\to 1$. As $\ell\to 0^+$ the
+	functional $\Pi_\ell$ $\Gamma$--converges to the sharp Griffith
+	functional~\eqref{eq:griffith_var}; for $\ell>0^+$ a finite material strength
+	is introduced, so that $\ell$ becomes a material property governing strength,
+	e.g.\ for plane stress
+	\begin{equation}\label{eq:sigc}
+		\sigma_c \;\propto\; \sqrt{\frac{G_c E}{\ell}} \;=\; \frac{K_{Ic}}{\sqrt{\ell}},
+	\end{equation}
+	with $K_{Ic}$ the fracture toughness and $E$ Young's modulus.
+
+	% =====================================================================
+	\section{Principle of Virtual Work and Dissipative Micro--force}\label{sec:vw}
+
+	The primal kinematic variables are the displacement field $\bu$ and the phase
+	field $\phi$. Restricting attention to small strains and isothermal conditions,
+	the strain tensor is
+	\begin{equation}\label{eq:strain}
+		\beps \;=\; \tfrac{1}{2}\bigl(\nabla\bu^{T}+\nabla\bu\bigr).
+	\end{equation}
+	Let $\delta$ denote virtual quantities. The Cauchy stress $\bsig$ is work
+	conjugate to $\beps$, the traction $\bT$ is work conjugate to $\bu$, the scalar
+	stress--like quantity $\omega$ is work conjugate to $\phi$, and the phase--field
+	micro--stress vector $\bxi$ is work conjugate to $\nabla\phi$. Because the phase
+	field is driven by the displacement problem alone, no external traction is
+	associated with $\phi$. In the absence of body forces the principle of virtual
+	work reads
+	\begin{equation}\label{eq:vw}
+		\int_{\Omega}\bigl\{\bsig:\delta\beps \;+\; \omega\,\delta\phi \;+\; \bxi\cdot\nabla\delta\phi\bigr\}\dd V
+		\;=\; \int_{\partial\Omega}\bigl(\bT\cdot\delta\bu\bigr)\dd S.
+	\end{equation}
+
+	\paragraph{Energetic and dissipative parts of the micro--stress.}
+	The key step for an explicit scheme is to allow the phase--field micro--stress
+	$\omega$ to possess \emph{both} an energetic and a dissipative part,
+	\begin{equation}\label{eq:w_split}
+		\omega \;=\; \omega_{\mathrm{en}} \;+\; \omega_{\mathrm{diss}},
+		\qquad
+		\omega_{\mathrm{en}} \;=\; \frac{\partial\psi}{\partial\phi},
+		\qquad
+		\omega_{\mathrm{diss}} \;=\; \eta\,\dot{\phi},
+	\end{equation}
+	where $\psi$ is the free energy density (defined in
+	Section~\ref{sec:const}) and $\eta\ge 0$ is the phase--field viscosity. The
+	dissipative part $\omega_{\mathrm{diss}}=\eta\dot{\phi}$ is the minimal
+	rate--dependent contribution that satisfies the dissipation inequality
+	$\omega_{\mathrm{diss}}\,\dot{\phi}=\eta\,\dot{\phi}^2\ge 0$ and vanishes in the
+	rate--independent (quasi--static) limit $\eta\to 0$. The micro--stress
+	vector $\bxi$ is taken purely energetic,
+	$\bxi=\partial\psi/\partial\nabla\phi$.
+
+	\paragraph{Local balance laws (strong form).}
+	Since~\eqref{eq:vw} must hold for an arbitrary domain $\Omega$ and for any
+	kinematically admissible variation, the fundamental lemma of the calculus of
+	variations yields the local force balances
+	\begin{equation}\label{eq:balances}
+		\nabla\cdot\bsig \;=\; \mathbf{0},
+		\qquad
+		\nabla\cdot\bxi \;-\; \omega \;=\; 0
+		\qquad\text{in }\Omega,
+	\end{equation}
+	with natural boundary conditions
+	\begin{equation}\label{eq:bcs}
+		\bsig\cdot\bn \;=\; \bT,
+		\qquad
+		\bxi\cdot\bn \;=\; 0
+		\qquad\text{on }\partial\Omega.
+	\end{equation}
+	Substituting the split~\eqref{eq:w_split} into the phase--field balance
+	$\nabla\cdot\bxi-\omega=0$ gives the \emph{rate} form
+	\begin{equation}\label{eq:rate_balance}
+		\boxed{\;\eta\,\dot{\phi} \;=\; \nabla\cdot\bxi \;-\; \omega_{\mathrm{en}}\;.}
+	\end{equation}
+	Equation~\eqref{eq:rate_balance} is the cornerstone of the explicit scheme:
+	for $\eta>0$ it is a first--order--in--time evolution law that can be
+	integrated by forward Euler, whereas for $\eta=0$ it collapses to the original
+	elliptic stationarity condition $\nabla\cdot\bxi-\omega_{\mathrm{en}}=0$.
+	The dynamic momentum balance used by the explicit MPM replaces the first
+	of~\eqref{eq:balances} by $\rho\,\dot{\bv}=\nabla\cdot\bsig+\rho\,\bb$, with
+	$\rho$ the density and $\bb$ the body force per unit mass.
+
+	% =====================================================================
+	\section{Constitutive Theory}\label{sec:const}
+
+	The free energy density of the solid is additively split into an elastic
+	(bulk) part and a fracture part,
+	\begin{equation}\label{eq:psi}
+		\psi(\beps,\phi,\nabla\phi) \;=\; \psi^e \;+\; \psi^f
+		\;=\; g(\phi)\,\tfrac{1}{2}\,\beps:\Cz:\beps \;+\; G_c\,\gamma(\phi,\nabla\phi),
+	\end{equation}
+	where $\Cz$ is the linear elastic stiffness tensor and
+	$\psi^e_0=\tfrac{1}{2}\beps:\Cz:\beps$ is the undamaged elastic energy
+	density. The Cauchy stress follows as
+	\begin{equation}\label{eq:cauchy}
+		\bsig \;=\; \frac{\partial\psi}{\partial\beps} \;=\; g(\phi)\,(\Cz:\beps) \;=\; g(\phi)\,\bsig_0,
+		\qquad \bsig_0 \equiv \Cz:\beps ,
+	\end{equation}
+	with $\bsig_0$ the effective (undamaged) stress.
+
+	\paragraph{Degradation function.}
+	The degradation function is continuous and monotonic with $g(0)=1$ and
+	$g(1)=0$; the standard quadratic form is adopted,
+	\begin{equation}\label{eq:g}
+		g(\phi) \;=\; (1-\phi)^2,
+		\qquad g'(\phi)=-2(1-\phi),
+		\qquad g''(\phi)=2.
+	\end{equation}
+
+	\paragraph{Crack surface density (AT1 / AT2).}
+	Following the Ambrosio--Tortorelli family, the crack surface density function
+	and the crack surface $A$ are
+	\begin{equation}\label{eq:gamma}
+		A \;=\; \int_{\Omega}\gamma(\phi)\dd V
+		\;=\; \int_{\Omega}\frac{1}{4c_w\ell}\Bigl(w(\phi) \;+\; \ell^2|\nabla\phi|^2\Bigr)\dd V,
+	\end{equation}
+	where the local crack geometry function $w(\phi)$ satisfies $w(0)=0$, $w(1)=1$,
+	and the normalisation constant is
+	\begin{equation}\label{eq:cw}
+		c_w \;=\; \int_0^1\sqrt{w(\varphi)}\,\dd\varphi .
+	\end{equation}
+	Two standard choices are retained throughout this report:
+	\begin{align}
+		\textbf{AT2:}\quad & w(\phi)=\phi^2,\quad c_w=\tfrac12, &
+		w'(\phi)&=2\phi, & w''(\phi)&=2, \label{eq:AT2}\\[2pt]
+		\textbf{AT1:}\quad & w(\phi)=\phi,\quad\; c_w=\tfrac23, &
+		w'(\phi)&=1, & w''(\phi)&=0. \label{eq:AT1}
+	\end{align}
+	The AT2 model degrades from the onset of loading, whereas the AT1 model
+	exhibits a purely elastic regime prior to damage onset. The critical
+	(homogeneous, $\nabla\phi=0$) failure stresses are
+	\begin{equation}\label{eq:sigc_models}
+		\sigma_c^{\,\mathrm{AT1}} \;=\; \sqrt{\frac{3EG_c}{8\ell}},
+		\qquad
+		\sigma_c^{\,\mathrm{AT2}} \;=\; \frac{3}{16}\sqrt{\frac{3EG_c}{\ell}} .
+	\end{equation}
+
+	\paragraph{Micro--stresses.}
+	From~\eqref{eq:psi}, the energetic scalar micro--stress and the
+	micro--stress vector are
+	\begin{align}
+		\omega_{\mathrm{en}} \;=\; \frac{\partial\psi}{\partial\phi}
+		&\;=\; g'(\phi)\,\psi^e \;+\; \frac{1}{4c_w\ell}\,G_c\,w'(\phi), \label{eq:wen}\\[4pt]
+		\bxi \;=\; \frac{\partial\psi}{\partial\nabla\phi}
+		&\;=\; \frac{\ell}{2c_w}\,G_c\,\nabla\phi. \label{eq:xi}
+	\end{align}
+	Together with the dissipative part~\eqref{eq:w_split}, the total
+	micro--stress is $\omega=g'(\phi)\psi^e+\tfrac{1}{4c_w\ell}G_c w'(\phi)+\eta\dot\phi$.
+
+	% =====================================================================
+	\section{Coupled Strong Forms}\label{sec:strong}
+
+	Collecting~\eqref{eq:rate_balance}, \eqref{eq:wen} and~\eqref{eq:xi}, the
+	regularised phase--field evolution law becomes the parabolic (Allen--Cahn type)
+	equation
+	\begin{equation}\label{eq:evolution}
+		\boxed{\;
+		\eta\,\dot{\phi}
+		\;=\; \frac{\ell}{2c_w}G_c\,\nabla^2\phi
+		\;-\; \frac{G_c}{4c_w\ell}\,w'(\phi)
+		\;-\; g'(\phi)\,\psi^e(\beps)\;,}
+	\end{equation}
+	obtained from $\nabla\cdot\bxi=\tfrac{\ell}{2c_w}G_c\nabla^2\phi$. Equivalently,
+	using $g'(\phi)=-2(1-\phi)$, the right--hand side expresses the competition
+	between the stored elastic energy (which drives $\phi\to 1$) and the fracture
+	energy (which penalises crack surface). In the quasi--static limit $\eta\to 0$,
+	\eqref{eq:evolution} reduces to the stationarity condition of the original
+	theory,
+	\begin{equation}\label{eq:stationary}
+		\frac{G_c}{2c_w\ell}\Bigl(\frac{w'(\phi)}{2}-\ell^2\nabla^2\phi\Bigr)
+		\;+\; g'(\phi)\,\psi^e(\beps) \;=\; 0 .
+	\end{equation}
+
+	The complete coupled boundary/initial--value problem to be solved is therefore
+	\begin{subequations}\label{eq:strongall}
+	\begin{align}
+		\rho\,\dot{\bv} &\;=\; \nabla\cdot\bigl[g(\phi)\,\bsig_0\bigr] \;+\; \rho\,\bb, & &\text{(momentum)} \label{eq:strong_mom}\\[2pt]
+		\eta\,\dot{\phi} &\;=\; \frac{\ell}{2c_w}G_c\,\nabla^2\phi - \frac{G_c}{4c_w\ell}w'(\phi) - g'(\phi)\,\mathcal{H}, & &\text{(phase field)} \label{eq:strong_pf}\\[2pt]
+		\bsig\cdot\bn &\;=\; \bT, \qquad \bxi\cdot\bn=\nabla\phi\cdot\bn=0, & &\text{(boundary)} \label{eq:strong_bc}
+	\end{align}
+	\end{subequations}
+	where, anticipating Section~\ref{sec:disc}, the elastic energy
+	$\psi^e$ driving the phase field has been replaced by the irreversible history
+	field $\mathcal{H}$. The two equations are coupled through $g(\phi)$ (the phase
+	field degrades the stress in the momentum balance) and through
+	$\psi^e$/$\mathcal{H}$ (the elastic energy drives the phase field).
+
+	% =====================================================================
+	\section{Discretisation and Explicit Phase--field Update}\label{sec:disc}
+
+	\subsection{Damage irreversibility and history field}
+
+	To prevent crack healing, the phase field must be monotonically
+	non--decreasing,
+	\begin{equation}\label{eq:irrev}
+		\phi_{t+\Dt} \;\ge\; \phi_t .
+	\end{equation}
+	Following Miehe \emph{et al.}, this is enforced by replacing the instantaneous
+	elastic energy $\psi^e_0$ with a history field $\mathcal{H}$ that records the
+	maximum elastic energy density attained over the loading history,
+	\begin{equation}\label{eq:history}
+		\mathcal{H} \;=\; \max_{\tau\in[0,t]}\psi^e_0(\tau),
+		\qquad
+		\psi^e_0-\mathcal{H}\le 0,\quad \dot{\mathcal{H}}\ge 0,\quad \dot{\mathcal{H}}\,(\psi^e_0-\mathcal{H})=0 .
+	\end{equation}
+	The crack driving force in the phase--field equation is thus $\mathcal{H}$, which
+	is updated particle--wise (Section~\ref{sec:algo}) and is monotone by
+	construction.
+
+	\subsection{Weak form of the damage sub--problem}
+
+	Adopting a total--Lagrangian description for the damage equation and using
+	the dissipative micro--force~\eqref{eq:w_split}, the weak form of the
+	phase--field balance~\eqref{eq:rate_balance} over the reference domain
+	$\Omega_0$ reads, for any admissible test function $\delta\phi$,
+	\begin{equation}\label{eq:weak_pf}
+		\int_{\Omega_0}\Bigl\{\,g'(\phi)\,\mathcal{H}\,\delta\phi
+		\;+\; \frac{G_c}{2c_w\ell}\Bigl[\tfrac{1}{2}w'(\phi)\,\delta\phi
+		\;+\; \ell^2\,\nabla_0\phi\cdot\nabla_0\delta\phi\Bigr]
+		\;+\; \eta\,\dot{\phi}\,\delta\phi\,\Bigr\}\dd V \;=\; 0 .
+	\end{equation}
+	The first three terms are exactly the energetic residual of the original
+	quasi--static formulation; the last term, $\eta\dot\phi\,\delta\phi$, is the new
+	dissipative contribution that renders the problem parabolic.
+
+	\subsection{Spatial discretisation}
+
+	Both the displacement and the phase field are interpolated with the same shape
+	functions. In the MPM the shape functions are the \emph{background grid}
+	functions $N_I$ (equivalently $\phi_I$ in some MPM notations); we write $N_I$ to
+	avoid clashing with the phase field $\phi$. Nodal quantities are interpolated as
+	\begin{equation}\label{eq:interp}
+		\bu \;=\; \sum_{I} N_I\,\hat{\bu}_I,
+		\qquad
+		\phi \;=\; \sum_{I} N_I\,\hat{\phi}_I,
+		\qquad
+		\beps \;=\; \sum_{I}\bB_I^{u}\,\hat{\bu}_I,
+		\qquad
+		\nabla\phi \;=\; \sum_{I}\bB_I\,\hat{\phi}_I,
+	\end{equation}
+	with $\bB_I^{u}$ the strain--displacement matrix and $\bB_I=\nabla N_I$ the
+	gradient of the nodal shape function. Inserting~\eqref{eq:interp}
+	into the weak form~\eqref{eq:weak_pf} yields, at node $I$, the residual
+	\begin{equation}\label{eq:res_pf}
+		R_I^{\phi}
+		\;=\; \int_{\Omega_0}\Bigl\{\,g'(\phi)\,N_I\,\mathcal{H}
+		\;+\; \frac{G_c}{2c_w\ell}\Bigl[\tfrac{1}{2}w'(\phi)\,N_I
+		\;+\; \ell^2\,\bB_I^{T}\,\nabla_0\phi\Bigr]
+		\;+\; \eta\,\dot{\phi}\,N_I\,\Bigr\}\dd V \;=\; 0 .
+	\end{equation}
+	For reference, the (small--strain) displacement residual and the consistent
+	tangents of the implicit formulation are
+	\begin{align}
+		\bR_I^{u} &\;=\; \int_{\Omega_0}\bigl[g(\phi)+\kappa\bigr]\,(\bB_I^{u})^{T}\bsig_0\dd V, \label{eq:res_u}\\
+		\bK_{IJ}^{u} &\;=\; \int_{\Omega_0}\bigl[g(\phi)+\kappa\bigr](\bB_I^{u})^{T}\Cz\,\bB_J^{u}\dd V, \label{eq:Kuu}\\
+		K_{IJ}^{\phi} &\;=\; \int_{\Omega_0}\Bigl\{\Bigl(g''(\phi)\,\mathcal{H}+\frac{G_c}{4c_w\ell}w''(\phi)\Bigr)N_I N_J + \frac{G_c\,\ell}{2c_w}\bB_I^{T}\bB_J\Bigr\}\dd V, \label{eq:Kpp}
+	\end{align}
+	where $\kappa\approx 10^{-7}$ is a small residual stiffness that prevents
+	ill--conditioning when $\phi=1$. The explicit scheme below does \emph{not}
+	assemble or invert $K^{\phi}$; it is reproduced only to make the connection with
+	the implicit formulation explicit.
+
+	\subsection{Explicit nodal phase--field update}\label{sec:explicit_update}
+
+	Discretising the dissipative term in~\eqref{eq:res_pf} with a forward (explicit)
+	Euler approximation of the rate,
+	\begin{equation}\label{eq:fwd_euler}
+		\dot{\phi} \;\approx\; \frac{\phi_I^{\,t+\Dt}-\phi_I^{\,t}}{\Dt},
+	\end{equation}
+	and lumping(eg row-sum rule) the viscous term onto a diagonal \emph{pseudo--mass}
+	\begin{equation}\label{eq:pseudomass}
+		m_I \;:=\; \int_{\Omega_0} N_I\dd V ,
+	\end{equation}
+	the nodal balance $R_I^{\phi}=0$ can be solved \emph{explicitly} for the
+	updated nodal phase field. Writing the energetic part of the residual as
+	$F_I$,
+	\begin{equation}\label{eq:Fnode}
+		F_I \;=\; \int_{\Omega_0}\Bigl\{\,g'(\phi^t)\,N_I\,\mathcal{H}
+		\;+\; \frac{G_c}{2c_w\ell}\Bigl[\tfrac{1}{2}w'(\phi^t)\,N_I
+		\;+\; \ell^2\,\bB_I^{T}\,\nabla_0\phi^{\,t}\Bigr]\Bigr\}\dd V,
+	\end{equation}
+	the update reads
+	\begin{equation}\label{eq:nodal_update}
+		\boxed{\;
+		\phi_I^{\,t+\Dt} \;=\; \phi_I^{\,t} \;-\; \frac{\Dt}{\eta\,m_I}\,F_I \;.}
+	\end{equation}
+
+	\paragraph{MPM (particle) quadrature.}
+	In the MPM the reference--domain integrals are evaluated using the material
+	points as quadrature points, each carrying a reference volume $V_p^0$, so that
+	$\int_{\Omega_0}(\,\cdot\,)\dd V\approx\sum_p(\,\cdot\,)_p\,V_p^0$ and the
+	pseudo--mass becomes $m_I=\sum_p N_I(\bx_p)\,V_p^0$. The explicit nodal update
+	in fully discrete MPM form is
+	\begin{equation}\label{eq:mpm_update}
+		\boxed{\;
+		\phi_I^{\,t+\Dt} \;=\; \phi_I^{\,t}
+		\;-\; \frac{\Dt}{\eta\,m_I}\sum_{p}\Bigl[\,g'(\phi_p^{t})\,N_I(\bx_p)\,\mathcal{H}_p
+		\;+\; \frac{G_c}{2c_w\ell}\Bigl(\tfrac12 w'(\phi_p^{t})\,N_I(\bx_p)
+		\;+\; \ell^2\,\nabla N_I(\bx_p)\cdot\nabla\phi^{\,t}\Bigr)\Bigr]V_p^0 \;.}
+	\end{equation}
+	Here $\phi_p^{t}=\sum_I N_I(\bx_p)\phi_I^{t}$ and
+	$\nabla\phi^{t}=\sum_I\nabla N_I(\bx_p)\phi_I^{t}$ are the phase field and its
+	gradient evaluated at the particle, and $\mathcal{H}_p$ is the particle history
+	field. After the grid update~\eqref{eq:mpm_update}, the particle phase field is
+	recovered by mapping back from the grid,
+	\begin{equation}\label{eq:p2phi}
+		\phi_p^{\,t+\Dt} \;=\; \sum_I N_I(\bx_p)\,\phi_I^{\,t+\Dt},
+	\end{equation}
+	and the irreversibility constraint~\eqref{eq:irrev} is enforced
+	point--wise, $\phi_p^{t+\Dt}\leftarrow\max(\phi_p^{t},\phi_p^{t+\Dt})$.
+
+	\paragraph{Remark (mapping with the original symbols).}
+	The structure of~\eqref{eq:mpm_update} is identical to the explicit
+	\eng{ULMPM--PFM} update of Kakouris \& Triantafyllou / Cheon \& Kim, under the
+	symbol correspondence $d\leftrightarrow\phi$, $\omega(d)\leftrightarrow g(\phi)$,
+	$\breve{Y}\leftrightarrow\mathcal{H}$, $\alpha(d)\leftrightarrow w(\phi)$,
+	$b\leftrightarrow\ell$, $c_\alpha\leftrightarrow c_w$ (up to the chosen
+	normalisation of $\gamma$), and the viscosity $\xi\leftrightarrow\eta$. We retain
+	the symbols of the variational theory throughout.
+
+	% =====================================================================
+	\section{Total Solution Algorithm: Explicit \eng{USL--MPM} with Phase Field}\label{sec:algo}
+
+	The phase--field update~\eqref{eq:mpm_update} is now embedded in the explicit
+	\eng{USL} (Update--Stress--Last) MPM cycle. In USL, the particle stresses are
+	updated \emph{last}, i.e.\ after the grid momenta have been advanced and mapped
+	back to the particles. Each material point $p$ carries position $\bx_p$,
+	velocity $\bv_p$, stress $\bsig_p$ (or deformation gradient $\bF_p$), volumes
+	$V_p^0,V_p$, mass $m_p$, density $\rho_p$, phase field $\phi_p$ and history
+	$\mathcal{H}_p$.
+
+	The phase field is advanced within the same particle--to--grid / grid--to--particle
+	machinery as the momentum problem:
+	\begin{enumerate}
+		\item In the \emph{particle--to--grid} (P2G) sweep, the pseudo--mass
+		$m_I=\sum_p N_I(\bx_p)V_p^0$ and the energetic damage force $F_I$
+		of~\eqref{eq:Fnode} are accumulated, alongside the mechanical nodal mass,
+		momentum and forces.
+		\item The grid phase field is advanced explicitly by~\eqref{eq:mpm_update},
+		in lock--step with the explicit momentum update.
+		\item In the \emph{grid--to--particle} (G2P) sweep, the particle phase field is
+		updated by~\eqref{eq:p2phi}, the history field $\mathcal{H}_p$ is refreshed
+		from the current elastic energy, and the particle stresses are updated last
+		using the degraded constitutive law $\bsig_p=g(\phi_p)\bsig_{0,p}$.
+	\end{enumerate}
+
+	The complete procedure is given in Algorithm~\ref{alg:uslmpm_pf}. Lines that are
+	new relative to the standard \eng{USL--MPM} (Algorithm~1 of the reference
+	formulation) are those handling the phase field: the pseudo--mass and damage
+	force accumulation in the P2G sweep, the explicit grid damage update, and the
+	particle damage / history update in the G2P sweep.
+
+	\begin{algorithm}[H]
+		\caption{Solution procedure of explicit \eng{USL--MPM} with phase--field fracture}
+		\label{alg:uslmpm_pf}
+		\begin{algorithmic}[1]
+			\State \textbf{Initialisation:} set up Cartesian grid; $t\leftarrow 0$
+			\State Set up particle data: $\bx_p^0,\bv_p^0,\bsig_p^0,\bF_p^0,V_p^0,m_p,\rho_p^0,\phi_p^0,\mathcal{H}_p^0$
+			\While{$t<t_f$}
+				\State \textbf{Reset grid quantities:} $m_I\!\leftarrow\!0,\;(m\bv)_I\!\leftarrow\!\mathbf{0},\;\mathbf{f}_I^{\mathrm{ext}}\!\leftarrow\!\mathbf{0},\;\mathbf{f}_I^{\mathrm{int}}\!\leftarrow\!\mathbf{0},\;m_I^{\phi}\!\leftarrow\!0,\;F_I\!\leftarrow\!0$
+				\Phase{Particle$\,\to\,$grid mapping (P2G)}
+					\State Nodal mass: $m_I^{t}=\sum_p N_I(\bx_p^t)\,m_p$
+					\State Nodal momentum: $(m\bv)_I^{t}=\sum_p N_I(\bx_p^t)\,(m\bv)_p$
+					\State External force: $\mathbf{f}_I^{\mathrm{ext},t}=\sum_p N_I(\bx_p^t)\,m_p\,\bb(\bx_p)$
+					\State Internal force: $\mathbf{f}_I^{\mathrm{int},t}=-\sum_p V_p^{t}\,\bsig_p^{t}\,\nabla N_I(\bx_p^t)$ \Comment{$\bsig_p^t=g(\phi_p^t)\bsig_{0,p}^t$ degraded}
+					\State Nodal force: $\mathbf{f}_I^{t}=\mathbf{f}_I^{\mathrm{ext},t}+\mathbf{f}_I^{\mathrm{int},t}$
+					\State Pseudo--mass: $m_I^{\phi}=\sum_p N_I(\bx_p^t)\,V_p^0$
+					\State Damage force: $F_I=\sum_p\Bigl[g'(\phi_p^t)N_I(\bx_p^t)\mathcal{H}_p^t+\dfrac{G_c}{2c_w\ell}\bigl(\tfrac12 w'(\phi_p^t)N_I(\bx_p^t)+\ell^2\nabla N_I(\bx_p^t)\!\cdot\!\nabla\phi^t\bigr)\Bigr]V_p^0$
+				\EndPhase
+				\State \textbf{Update momenta:} $(m\bv)_I^{\,t+\Dt}=(m\bv)_I^{t}+\mathbf{f}_I^{t}\,\Dt$
+				\State \textbf{Update grid phase field:} $\phi_I^{\,t+\Dt}=\phi_I^{t}-\dfrac{\Dt}{\eta\,m_I^{\phi}}\,F_I$
+				\State \textbf{Fix Dirichlet nodes} $I$: e.g.\ $(m\bv)_I^{t}=\mathbf{0}$ and $(m\bv)_I^{\,t+\Dt}=\mathbf{0}$; prescribe $\phi_I$ on damage--BC nodes
+				\Phase{Grid$\,\to\,$particle mapping (G2P)}
+					\State Nodal velocities: $\bv_I^{t}=(m\bv)_I^{t}/m_I^{t}$, \;\; $\bv_I^{\,t+\Dt}=(m\bv)_I^{\,t+\Dt}/m_I^{t}$
+					\State Update particle velocities (PIC/FLIP blend): \par
+					\hskip1.2em $\bv_p^{\,t+\Dt}=\alpha\bigl(\bv_p^{t}+\sum_I N_I(\bx_p^t)[\bv_I^{\,t+\Dt}-\bv_I^{t}]\bigr)+(1-\alpha)\sum_I N_I(\bx_p^t)\,\bv_I^{\,t+\Dt}$
+					\State Update particle positions: $\bx_p^{\,t+\Dt}=\bx_p^{t}+\Dt\sum_I N_I(\bx_p^t)\,\bv_I^{\,t+\Dt}$
+					\State Update particle phase field: $\phi_p^{\,t+\Dt}=\sum_I N_I(\bx_p^t)\,\phi_I^{\,t+\Dt}$
+					\State Enforce irreversibility: $\phi_p^{\,t+\Dt}\leftarrow\max\!\bigl(\phi_p^{t},\,\phi_p^{\,t+\Dt}\bigr)$
+					\State Velocity gradient: $\bL_p^{\,t+\Dt}=\sum_I \nabla N_I(\bx_p^t)\,\bv_I^{\,t+\Dt}$
+					\State Deformation gradient: $\bF_p^{\,t+\Dt}=(\bI+\bL_p^{\,t+\Dt}\Dt)\,\bF_p^{t}$
+					\State Update volume: $V_p^{\,t+\Dt}=\det(\bF_p^{\,t+\Dt})\,V_p^0$
+					\State Rate of deformation: $\bD_p^{\,t+\Dt}=\tfrac12\bigl(\bL_p^{\,t+\Dt}+(\bL_p^{\,t+\Dt})^{T}\bigr)$
+					\State Strain increment: $\Delta\beps_p=\Dt\,\bD_p^{\,t+\Dt}$
+					\State \textbf{Update stress (last):} effective $\bsig_{0,p}^{\,t+\Dt}=\bsig_{0,p}^{t}+\Cz:\Delta\beps_p$; degraded $\bsig_p^{\,t+\Dt}=g(\phi_p^{\,t+\Dt})\,\bsig_{0,p}^{\,t+\Dt}$
+					\State Update elastic energy and history: $\psi^e_{0,p}=\tfrac12\beps_p:\Cz:\beps_p$, \;\; $\mathcal{H}_p^{\,t+\Dt}=\max\!\bigl(\mathcal{H}_p^{t},\,\psi^e_{0,p}\bigr)$
+				\EndPhase
+				\State \textbf{Advance time:} $t\leftarrow t+\Dt$
+			\EndWhile
+		\end{algorithmic}
+	\end{algorithm}
+
+	\subsection{Time--step and stability considerations}
+
+	Two explicit stability restrictions act simultaneously, and the time step must
+	respect the smaller of the two.
+
+	\paragraph{Elastodynamic (CFL) limit.}
+	The momentum update is conditionally stable and limited by the
+	Courant--Friedrichs--Lewy condition,
+	\begin{equation}\label{eq:cfl}
+		\Dt \;\le\; \Dt_{\mathrm{crit}}^{\,u} \;=\; \frac{h}{c_d},
+		\qquad
+		c_d \;=\; \sqrt{\frac{\lambda+2\mu}{\rho}},
+	\end{equation}
+	with $h$ the background cell size and $c_d$ the dilatational wave speed. A
+	safety factor $0<\mathrm{CFL}\le 1$ is normally applied,
+	$\Dt=\mathrm{CFL}\cdot h/c_d$.
+
+	\paragraph{Parabolic (diffusion) limit of the phase field.}
+	Treating~\eqref{eq:evolution} as a diffusion equation with diffusivity
+	$D_\phi=\tfrac{\ell\,G_c}{2c_w\,\eta}$, the forward--Euler update is stable only
+	if
+	\begin{equation}\label{eq:pf_stab}
+		\Dt \;\le\; \Dt_{\mathrm{crit}}^{\,\phi} \;\sim\; \frac{h^2}{2\,n\,D_\phi}
+		\;=\; \frac{c_w\,\eta\,h^2}{n\,\ell\,G_c},
+	\end{equation}
+	with $n$ the spatial dimension. Equation~\eqref{eq:pf_stab} shows the role of
+	the viscosity $\eta$: a larger $\eta$ relaxes the phase--field time--step
+	restriction (and brings the response closer to rate--independent fracture), but
+	also slows the rate at which the crack can grow, so that $\eta$ must be small
+	enough not to artificially retard the physical crack speed. In practice $\eta$
+	is chosen so that $\Dt_{\mathrm{crit}}^{\,\phi}\gtrsim\Dt_{\mathrm{crit}}^{\,u}$,
+	i.e.\ so that the elastodynamic CFL condition governs and the phase field can be
+	advanced with the same $\Dt$ as the momentum update,
+	\begin{equation}\label{eq:eta_choice}
+		\eta \;\gtrsim\; \frac{n\,\ell\,G_c}{c_w\,h^2}\,\Dt_{\mathrm{crit}}^{\,u}
+		\;=\; \frac{n\,\ell\,G_c}{c_w\,h\,c_d}.
+	\end{equation}
+
+	\paragraph{Consistency.}
+	Because $\omega_{\mathrm{diss}}=\eta\dot\phi\to 0$ as $\dot\phi\to 0$, the
+	stationary solutions of the explicit scheme coincide with the equilibrium
+	solutions of the original quasi--static variational theory: the viscous term
+	affects only the transient path towards equilibrium, not the converged
+	crack pattern, provided $\eta$ is sufficiently small. This is the sense in which
+	the dissipative regularisation is a purely \emph{algorithmic} device enabling
+	the explicit time march while preserving the underlying fracture physics.
+
+	% =====================================================================
+	\section{Summary}
+
+	Starting from the variational phase--field fracture theory, a single
+	constitutive enrichment---the dissipative phase--field micro--force
+	$\omega_{\mathrm{diss}}=\eta\,\dot\phi$---was introduced. This converts the
+	elliptic damage stationarity condition into a parabolic Allen--Cahn evolution
+	law~\eqref{eq:evolution}, which can be integrated by an explicit forward--Euler
+	update on a lumped pseudo--mass~\eqref{eq:mpm_update}. The update was embedded in
+	the explicit Update--Stress--Last MPM cycle, yielding the fully explicit
+	\eng{USL--MPM--PF} solution procedure of Algorithm~\ref{alg:uslmpm_pf}, in which
+	displacement and phase field are advanced within a single time loop subject to
+	the combined CFL/diffusion time--step restriction. Both AT1 and AT2 crack
+	density models are supported through the functions $w(\phi)$ and the
+	normalisation $c_w$, and damage irreversibility is enforced through the
+	monotone history field $\mathcal{H}$.
+
+
+	% =====================================================================
+
+	\begin{thebibliography}{9}
+
+	\bibitem{nguyen2023mpm}
+	V.P.\ Nguyen, A.\ de Vaucorbeil, S.\ Bordas,
+	\textit{The Material Point Method: Theory, Implementations and Applications}.
+	Springer, Scientific Computation, 2023.\\
+	\href{https://doi.org/10.1007/978-3-031-24070-6}{https://doi.org/10.1007/978-3-031-24070-6}
+
+	\bibitem{kristensen2021pff}
+	P.K.\ Kristensen, C.F.\ Niordson, E.\ Mart\'inez-Pa\~neda,
+	An assessment of phase field fracture: crack initiation and growth.
+	\textit{Philosophical Transactions of the Royal Society A}, 379(2203):20210021, 2021.\\
+	\href{https://doi.org/10.1098/rsta.2021.0021}{https://doi.org/10.1098/rsta.2021.0021}
+
+	\bibitem{hu2023explicit}
+	Z.\ Hu, Z.\ Zhang, X.\ Zhou, X.\ Cui, H.\ Ye,
+	Explicit phase-field material point method with the convected particle domain interpolation for impact/contact fracture in elastoplastic geomaterials.
+	\textit{Computer Methods in Applied Mechanics and Engineering}, 405:115851, 2023.\\
+	\href{https://doi.org/10.1016/j.cma.2022.115851}{https://doi.org/10.1016/j.cma.2022.115851}
+
+	\end{thebibliography}
+
+\end{document}

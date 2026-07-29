@@ -1,32 +1,8 @@
-# LaTeX auxiliary files
-*.aux
-*.log
-*.out
-*.toc
-*.lof
-*.lot
-*.loa
-*.fls
-*.fdb_latexmk
-*.synctex.gz
-*.synctex(busy)
-*.bbl
-*.blg
-*.idx
-*.ilg
-*.ind
-*.nav
-*.snm
-*.vrb
-*.xdv
-
 profile_output.prof
 profile_cmds.txt
 vtk_output/
-vtk_output_bone/
-vtk_output_cylinder/
-vtk_output_ep/
-particle_history.csv
+vtk_output_aniso/
+vtk_output_Yvonnet/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

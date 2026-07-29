@@ -81,34 +81,23 @@ def gauss_2D(n):
     
     return W, Q
 
+def cohesive_quad2D(n):
+    dp = 2/n
+    r1pt = np.ones(n)*dp/2 + np.arange(n)*dp
+    r1wt = np.ones(n)*dp
 
-def gauss_3D(n):
-    """
-    Computes 3D Gauss quadrature points and weights using a tensor product.
-
-    Parameters:
-    n: Quadrature order in each direction
-
-    Returns:
-    W: Quadrature weights (n**3,)
-    Q: Quadrature points (n**3, 3)
-    """
-    r1pt, r1wt = gauss_legendre(-1, 1, n)
-
-    num_points = n ** 3
-    Q = np.zeros((num_points, 3))
+    num_points = n ** 2
+    Q = np.zeros((num_points, 2))
     W = np.zeros(num_points)
-
+    
     d = 0
     for i in range(n):
         for j in range(n):
-            for k in range(n):
-                Q[d, :] = [r1pt[i], r1pt[j], r1pt[k]]
-                W[d]    = r1wt[i] * r1wt[j] * r1wt[k]
-                d += 1
-
+            Q[d, :] = [r1pt[i], r1pt[j]]
+            W[d] = r1wt[i] * r1wt[j]
+            d += 1
+    
     return W, Q
-
 
 if __name__ == "__main__":
     # Example usage
@@ -121,3 +110,8 @@ if __name__ == "__main__":
     W, Q = gauss_2D(n)
     print("2D Gauss quadrature points:\n", Q)
     print("2D Gauss quadrature weights:", W)
+
+    W, Q = cohesive_quad2D(n)
+    print("2D Cohesive quadrature points:\n", Q)
+    print("2D Cohesive quadrature weights:", W)
+
