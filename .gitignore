@@ -3,6 +3,7 @@ profile_cmds.txt
 vtk_output/
 vtk_output_aniso/
 vtk_output_Yvonnet/
+desktop.ini
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

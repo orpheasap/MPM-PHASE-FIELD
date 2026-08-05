@@ -24,8 +24,9 @@
 #      d_I^{t+dt}     = d_I    - dt/(eta_d     m_I) F_I^d
 #      alpha_I^{t+dt} = alpha_I- dt/(eta_alpha m_I) F_I^alpha
 #
-#  eta_d, eta_alpha are chosen (eq. 8.x) so the two parabolic critical steps
-#  coincide with the elastodynamic CFL, so all three fields march with one dt.
+#  eta_d and eta_alpha are taken equal here.  The shared viscosity is calibrated
+#  from the bulk field so dt_d matches the elastodynamic CFL, while dt_alpha is
+#  intentionally smaller and becomes the limiting explicit step. Clio
 #
 #  *** UNITS: SI throughout -> m, N, Pa, kg, s. ***
 #      stress/stiffness [Pa], length [m], density [kg/m^3], toughness [N/m],
@@ -44,13 +45,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 import shutil
 
-from src.material import Material
 from src.mesh2D import Mesh
 from src.particle import ParticleSet
 from src.lagrange_basis import lagrange_basis_Q4
 from src.quadrature import gauss_2D
 from src.solver_utilities import NodeState, get_mpm2d_shape, build_particle_element_map
 from src.vtk_export import write_pvd, write_particles_vtp_aniso
+from src.yvonnet_model import DEFAULT_PARAMS, build_model
 
 
 np.set_printoptions(precision=4, suppress=True)
@@ -62,67 +63,31 @@ def print_section(title):
 
 
 # =============================================================================
-#  Material properties  (SI units)
+#  All physical inputs live in one place (src/yvonnet_model.DEFAULT_PARAMS).
+#  This exact dict is written into the checkpoint so resume_Yvonnet.py can
+#  rebuild an identical material model + grid without redefining anything.
 # =============================================================================
-E   = 10.0e9      # Pa        (10 GPa)
-nu  = 0.25        # -
-rho = 2450.0      # kg/m^3
+params = dict(DEFAULT_PARAMS)
+E, nu, rho             = params['E'], params['nu'], params['rho']
+theta_deg, xi          = params['theta_deg'], params['xi']
+gc_d, gc_alpha         = params['gc_d'], params['gc_alpha']
+Lx, Ly, hx, hy         = params['Lx'], params['Ly'], params['hx'], params['hy']
+ell_d, ell_alpha       = params['ell_d'], params['ell_alpha']
+sigma, notch_length    = params['sigma'], params['notch_length']
+CFL                    = params['CFL']
 
-# Reference isotropic plane-stress material (used only for the intact check).
-material = Material(E, nu, rho, stressState='PLANE_STRESS')
+model    = build_model(params)
+material = model['material']
+C_aniso  = model['C_aniso']
+M2       = model['M2']
+omega_a  = model['omega_a']
+mesh     = model['mesh']
+numx, numy, h_e = model['numx'], model['numy'], model['h_e']
+
 print_section("Material Properties (SI)")
 print(f"E = {E:.4g} Pa,  nu = {nu},  rho = {rho:.4g} kg/m^3")
 print("Isotropic plane-stress elasticity matrix [Pa]:")
 print(material.elasticity_matrix)
-
-
-# =============================================================================
-#  Anisotropic layered constitutive model  (Sec. 3-4 of the .tex)
-# =============================================================================
-theta_deg = 60.0                       # layer angle theta (deg)
-theta     = np.deg2rad(theta_deg)
-xi        = 30.0                       # anisotropy penalty xi^alpha (>> 1)
-
-c, s = np.cos(theta), np.sin(theta)
-pref = E / (1.0 - nu**2)               # E/(1-nu^2) prefactor of the fit
-
-# --- Fitted effective stiffness in the LAYER frame,  C'(alpha) = A1 + A2 (1-a)^2
-#     (eq. 7.8).  Coefficients 0.8437, 0.1563 are the straight-interphase RVE fit;
-#     A1 + A2 = pref * [[1, nu, 0],[nu, 1, 0],[0, 0, (1-nu)/2]] identically
-#     (0.8437 + 0.1563 = 1), so the intact limit C'(0) always recovers the
-#     isotropic plane-stress matrix regardless of nu.
-A1 = pref * np.array([
-    [0.8437, 0.0, 0.0],
-    [0.0,    0.0, 0.0],
-    [0.0,    0.0, 0.0],
-])
-A2 = pref * np.array([
-    [0.1563, nu,  0.0],
-    [nu,     1.0, 0.0],
-    [0.0,    0.0, (1.0 - nu) / 2.0],
-])
-
-# --- Stress Voigt rotation matrix T_sig(theta)  (eq. 31), Voigt order {11,22,12}
-T_sig = np.array([
-    [c*c,  s*s, -2.0*c*s],
-    [s*s,  c*c,  2.0*c*s],
-    [c*s, -c*s,  c*c - s*s],
-])
-
-# --- Rotate once to the GLOBAL frame:  C_a(alpha) = CA1 + M2 (1-alpha)^2
-#     dC_a/dalpha = -2 (1-alpha) M2.   (eqs. 33-34)
-CA1 = T_sig @ A1 @ T_sig.T             # alpha-independent part
-M2  = T_sig @ A2 @ T_sig.T             # multiplies (1-alpha)^2  (= T_sig A2 T_sig^T)
-
-
-def C_aniso(alpha):
-    """Global-frame damage-dependent effective stiffness C_a(alpha, theta) [Pa]."""
-    return CA1 + M2 * (1.0 - alpha) ** 2
-
-
-# --- Anisotropic gradient (structural) tensor omega_a(theta) = I + xi P_a  (eq. 41)
-P_a     = np.array([[c*c, s*c], [s*c, s*s]])     # projector onto layer direction e1'
-omega_a = np.eye(2) + xi * P_a                   # 2x2, constant for uniform theta
 
 print_section("Anisotropic Layer Model")
 print(f"Layer angle theta = {theta_deg} deg,  anisotropy penalty xi = {xi}")
@@ -135,42 +100,15 @@ print("omega_a(theta):")
 print(omega_a)
 print(f"lambda_max(omega_a) = 1 + xi = {1.0 + xi:.1f}")
 
-
-# =============================================================================
-#  Fracture (phase-field) properties  (SI units)
-# =============================================================================
-# Length scales tied to the element size:  ell_d = ell_alpha = 2 h_e  (Sec. 4).
-gc_d     = 4.0          # N/m   bulk layer fracture toughness
-gc_alpha = 1.0          # N/m   interfacial toughness
-
 print_section("Fracture Properties (SI)")
 print(f"gc_d     = {gc_d:.4g} N/m   (bulk layer)")
 print(f"gc_alpha = {gc_alpha:.4g} N/m   (interface)")
 
-
-# =============================================================================
-#  Background grid  (SI units)
-# =============================================================================
-_h_scale = float(os.environ.get("PF_H_SCALE", "1.0"))
-
-Lx   = 0.01                      # m   plate width  (10 mm)
-Ly   = 0.01                      # m   plate height (10 mm)
-hx   = 0.25e-3 * _h_scale        # m   cell size x  (0.25 mm)
-hy   = 0.25e-3 * _h_scale        # m   cell size y
-numx = int(round(Lx / hx))       # 40
-numy = int(round(Ly / hy))       # 40
-h_e  = min(hx, hy)               # element size for the length scales
-
-# Regularisation lengths ell_d = ell_alpha = 2 h_e
-ell_d     = 2.0 * h_e
-ell_alpha = 2.0 * h_e
-
-mesh = Mesh(Lx, Ly, numx, numy)
 print_section("Background Grid (SI)")
 print(f"Domain:   {Lx} x {Ly} m")
 print(f"Cells:    {numx} x {numy},  h = {hx:.4g} m")
 print(f"Nodes:    {mesh.nodeCount},  Elements: {mesh.elemCount}")
-print(f"ell_d = ell_alpha = 2h = {ell_d:.4g} m")
+print(f"ell_d = ell_alpha = {ell_d:.4g} m")
 
 
 # =============================================================================
@@ -201,7 +139,6 @@ for e in range(pmesh.elemCount):
 
 
 # ----- Pre-notch: remove two grid rows straddling y = Ly/2, x in [0, notch] -----
-notch_length = 0.005               # m   (5 mm from left)
 notch_row_lo = numy // 2 - 1
 notch_row_hi = numy // 2
 
@@ -243,7 +180,6 @@ print(f"Total mass:       {np.sum(particles.mass):.6e} kg")
 # =============================================================================
 #  Neumann BCs -- symmetric tension sigma on top and bottom edges  (SI)
 # =============================================================================
-sigma = float(os.environ.get("PF_SIGMA", str(1.0e6)))   # Pa  (1 MPa)
 neumann_traction_y = np.zeros(pCount)
 
 for p in range(pCount):
@@ -269,30 +205,18 @@ node_state = NodeState(mesh.nodeCount)
 
 # =============================================================================
 #  Solver parameters -- three explicit stability limits (Sec. 7 of the .tex)
+#  (all derived quantities come from build_model(); see src/yvonnet_model.py)
 # =============================================================================
-# (1) Elastodynamic CFL:  dt_u = h / c_d ,  c_d = sqrt(C_max / rho),
-#     C_max = largest eigenvalue of the intact stiffness C_a(0, theta).
-C_max  = float(np.max(np.linalg.eigvalsh(C_aniso(0.0))))
-c_d    = np.sqrt(C_max / rho)
-dt_u   = h_e / c_d
+C_max         = model['C_max']
+c_d           = model['c_d']
+dt_u          = model['dt_u']
+eta_d         = model['eta_d']
+eta_alpha     = model['eta_alpha']
+dt_d_crit     = model['dt_d_crit']
+dt_alpha_crit = model['dt_alpha_crit']
+dtime         = model['dtime']
 
-# Choose the viscosities (eq. 8.x) so the two parabolic critical steps EQUAL the
-# elastodynamic CFL:   set dt_d_crit = dt_alpha_crit = dt_u.
-#     dt_d_crit     = eta_d     h^2 / (2 n gc_d     ell_d)              (n = 2)
-#     dt_alpha_crit = eta_alpha h^2 / (2 n gc_alpha ell_alpha (1+xi))
-#  =>  eta_d     = 2 n gc_d     ell_d     / (h c_d)
-#      eta_alpha = 2 n gc_alpha ell_alpha (1+xi) / (h c_d)
-ndim      = 2
-eta_d     = 2.0 * ndim * gc_d     * ell_d               / (h_e * c_d)
-eta_alpha = 2.0 * ndim * gc_alpha * ell_alpha * (1.0 + xi) / (h_e * c_d)
-
-# Resulting parabolic critical steps (equal to dt_u by construction)
-dt_d_crit     = eta_d     * h_e**2 / (2.0 * ndim * gc_d     * ell_d)
-dt_alpha_crit = eta_alpha * h_e**2 / (2.0 * ndim * gc_alpha * ell_alpha * (1.0 + xi))
-
-CFL    = float(os.environ.get("PF_CFL", "0.5"))         # safety factor SF
-dtime  = CFL * min(dt_u, dt_d_crit, dt_alpha_crit)
-nsteps = int(os.environ.get("PF_NSTEPS", "100"))
+nsteps = 100
 tfinal = dtime * nsteps
 
 print_section("Solver Parameters (three-way CFL)")
@@ -302,7 +226,8 @@ print(f"(1) elastodynamic  dt_u        = {dt_u:.4e} s")
 print(f"(2) bulk-damage    dt_d_crit   = {dt_d_crit:.4e} s")
 print(f"(3) interfacial    dt_alpha_crit = {dt_alpha_crit:.4e} s")
 print(f"eta_d     = {eta_d:.4e} Pa*s")
-print(f"eta_alpha = {eta_alpha:.4e} Pa*s   (ratio eta_alpha/eta_d = {eta_alpha/eta_d:.3f})")
+print(f"eta_alpha = {eta_alpha:.4e} Pa*s   (shared viscosity; ratio eta_alpha/eta_d = {eta_alpha/eta_d:.3f})")
+print(f"Ordering: dt_alpha_crit < dt_d_crit = dt_u ?  {dt_alpha_crit < dt_d_crit and np.isclose(dt_d_crit, dt_u)}")
 print(f"dtime (SF = {CFL}):         {dtime:.4e} s")
 print(f"Total time:                {tfinal:.4e} s,  steps = {nsteps}")
 
@@ -515,10 +440,7 @@ np.savez_compressed(
     initial_volume       = particles.initial_volume,
     neumann_particles    = particles.neumann_particles,
     neumann_traction_y   = neumann_traction_y,
-    theta_deg            = np.array(theta_deg),
-    xi                   = np.array(xi),
-    eta_d                = np.array(eta_d),
-    eta_alpha            = np.array(eta_alpha),
+    params               = np.array(params, dtype=object),   # every physical input; see src/yvonnet_model.py
     t                    = np.array(t),
     istep_start          = np.array(nsteps),
     ta = np.array(ta), ka = np.array(ka), sa = np.array(sa),

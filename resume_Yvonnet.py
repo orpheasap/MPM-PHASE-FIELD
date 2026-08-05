@@ -19,11 +19,10 @@ import msvcrt
 import time
 import numpy as np
 
-from src.material import Material
-from src.mesh2D import Mesh
 from src.particle import ParticleSet
 from src.solver_utilities import NodeState, get_mpm2d_shape, build_particle_element_map
 from src.vtk_export import write_pvd, write_particles_vtp_aniso
+from src.yvonnet_model import build_model
 
 
 np.set_printoptions(precision=4, suppress=True)
@@ -73,8 +72,7 @@ def _input_with_timeout(prompt, timeout=10, default='y'):
         time.sleep(0.05)
 
 
-def _save_checkpoint(path, pCount, particles, alpha_p, neumann_traction_y,
-                     theta_deg, xi, eta_d, eta_alpha,
+def _save_checkpoint(path, pCount, particles, alpha_p, neumann_traction_y, params,
                      t, istep_start, ta, ka, sa, dda, aa, vtk_entries):
     np.savez_compressed(
         path,
@@ -94,10 +92,7 @@ def _save_checkpoint(path, pCount, particles, alpha_p, neumann_traction_y,
         initial_volume       = particles.initial_volume,
         neumann_particles    = particles.neumann_particles,
         neumann_traction_y   = neumann_traction_y,
-        theta_deg            = np.array(theta_deg),
-        xi                   = np.array(xi),
-        eta_d                = np.array(eta_d),
-        eta_alpha            = np.array(eta_alpha),
+        params               = np.array(params, dtype=object),
         t                    = np.array(t),
         istep_start          = np.array(istep_start),
         ta = np.array(ta), ka = np.array(ka), sa = np.array(sa),
@@ -108,67 +103,31 @@ def _save_checkpoint(path, pCount, particles, alpha_p, neumann_traction_y,
 
 
 # =============================================================================
-#  Material + anisotropic model  (must match the original run, SI units)
-# =============================================================================
-E   = 10.0e9      # Pa
-nu  = 0.25
-rho = 2450.0      # kg/m^3
-material = Material(E, nu, rho, stressState='PLANE_STRESS')
-
-theta_deg = 60.0
-xi        = 30.0
-theta     = np.deg2rad(theta_deg)
-c, s      = np.cos(theta), np.sin(theta)
-pref      = E / (1.0 - nu**2)
-
-A1 = pref * np.array([[0.8437, 0.0, 0.0],
-                      [0.0,    0.0, 0.0],
-                      [0.0,    0.0, 0.0]])
-A2 = pref * np.array([[0.1563, nu,  0.0],
-                      [nu,     1.0, 0.0],
-                      [0.0,    0.0, (1.0 - nu) / 2.0]])
-T_sig = np.array([[c*c,  s*s, -2.0*c*s],
-                  [s*s,  c*c,  2.0*c*s],
-                  [c*s, -c*s,  c*c - s*s]])
-CA1 = T_sig @ A1 @ T_sig.T
-M2  = T_sig @ A2 @ T_sig.T
-
-def C_aniso(alpha):
-    return CA1 + M2 * (1.0 - alpha) ** 2
-
-P_a     = np.array([[c*c, s*c], [s*c, s*s]])
-omega_a = np.eye(2) + xi * P_a
-
-# Fracture properties (SI)
-gc_d     = 4.0e3
-gc_alpha = 1.0e3
-
-
-# =============================================================================
-#  Background grid  (must match the original run, SI units)
-# =============================================================================
-_h_scale = float(os.environ.get("PF_H_SCALE", "1.0"))
-Lx   = 0.01
-Ly   = 0.01
-hx   = 0.25e-3 * _h_scale
-hy   = 0.25e-3 * _h_scale
-numx = int(round(Lx / hx))
-numy = int(round(Ly / hy))
-h_e  = min(hx, hy)
-ell_d     = 2.0 * h_e
-ell_alpha = 2.0 * h_e
-
-mesh = Mesh(Lx, Ly, numx, numy)
-print_section("Background Grid (SI)")
-print(f"Cells: {numx} x {numy},  h = {hx:.4g} m,  nodes: {mesh.nodeCount}")
-print(f"theta = {theta_deg} deg,  xi = {xi},  ell_d = ell_alpha = {ell_d:.4g} m")
-
-
-# =============================================================================
-#  Load checkpoint
+#  Load checkpoint -- particle state AND every physical input (params dict)
+#  saved by Yvonnet_plate.py. The material model, grid and solver constants
+#  are then rebuilt from those params via build_model(), so this script never
+#  redefines physics data of its own.
 # =============================================================================
 print_section(f"Loading checkpoint:  {CHECKPOINT_FILE}")
 ckpt = np.load(CHECKPOINT_FILE, allow_pickle=True)
+
+params    = ckpt['params'].item()
+model     = build_model(params)
+material  = model['material']
+C_aniso   = model['C_aniso']
+M2        = model['M2']
+omega_a   = model['omega_a']
+mesh      = model['mesh']
+numx, numy, h_e = model['numx'], model['numy'], model['h_e']
+rho               = params['rho']
+hx, hy            = params['hx'], params['hy']
+theta_deg, xi     = params['theta_deg'], params['xi']
+gc_d, gc_alpha    = params['gc_d'], params['gc_alpha']
+ell_d, ell_alpha  = params['ell_d'], params['ell_alpha']
+
+print_section("Background Grid (SI)")
+print(f"Cells: {numx} x {numy},  h = {hx:.4g} m,  nodes: {mesh.nodeCount}")
+print(f"theta = {theta_deg} deg,  xi = {xi},  ell_d = ell_alpha = {ell_d:.4g} m")
 
 pCount    = int(ckpt['pCount'])
 particles = ParticleSet(pCount)
@@ -212,22 +171,28 @@ node_state = NodeState(mesh.nodeCount)
 
 
 # =============================================================================
-#  Solver parameters -- three-way CFL (identical construction to the driver)
+#  Solver parameters -- pulled from the same build_model() output used by
+#  Yvonnet_plate.py, so they're guaranteed consistent with the original run.
 # =============================================================================
-C_max  = float(np.max(np.linalg.eigvalsh(C_aniso(0.0))))
-c_d    = np.sqrt(C_max / rho)
-dt_u   = h_e / c_d
-ndim   = 2
-eta_d     = 2.0 * ndim * gc_d     * ell_d               / (h_e * c_d)
-eta_alpha = 2.0 * ndim * gc_alpha * ell_alpha * (1.0 + xi) / (h_e * c_d)
+C_max         = model['C_max']
+c_d           = model['c_d']
+dt_u          = model['dt_u']
+eta_d         = model['eta_d']
+eta_alpha     = model['eta_alpha']
+dt_d_crit     = model['dt_d_crit']
+dt_alpha_crit = model['dt_alpha_crit']
+dtime         = model['dtime']
+CFL           = params['CFL']
 
-CFL    = float(os.environ.get("PF_CFL", "0.5"))
-dtime  = CFL * dt_u          # all three critical steps coincide with dt_u
-nsteps = int(os.environ.get("PF_NSTEPS", "500"))   # steps per batch
+nsteps = int(os.environ.get('PF_NSTEPS', 500))   # steps per batch (override via env var)
 
 print_section("Solver Parameters")
-print(f"c_d = {c_d:.4e} m/s,  dt_u = dt_d = dt_alpha = {dt_u:.4e} s")
+print(f"c_d = {c_d:.4e} m/s")
+print(f"dt_u = {dt_u:.4e} s")
+print(f"dt_d_crit = {dt_d_crit:.4e} s")
+print(f"dt_alpha_crit = {dt_alpha_crit:.4e} s")
 print(f"eta_d = {eta_d:.4e} Pa*s,  eta_alpha = {eta_alpha:.4e} Pa*s")
+print(f"Ordering: dt_alpha_crit < dt_d_crit = dt_u ?  {dt_alpha_crit < dt_d_crit and np.isclose(dt_d_crit, dt_u)}")
 print(f"dtime (SF {CFL}): {dtime:.4e} s,  batch size: {nsteps} steps")
 
 
@@ -235,7 +200,7 @@ print(f"dtime (SF {CFL}): {dtime:.4e} s,  batch size: {nsteps} steps")
 tol      = 1e-24
 tol_pm   = 1e-30
 vtk_dir  = 'vtk_output_Yvonnet'
-vtk_interval = int(os.environ.get("PF_VTK_INTERVAL", "50"))
+vtk_interval = 50
 
 I_mat   = np.eye(2)
 mpoints = particles.mpoints
@@ -398,8 +363,7 @@ while True:
     pvd_path = write_pvd(vtk_dir, vtk_entries)
     print(f"simulation.pvd updated  ({len(vtk_entries)} frames total)")
 
-    _save_checkpoint(CHECKPOINT_FILE, pCount, particles, alpha_p, neumann_traction_y,
-                     theta_deg, xi, eta_d, eta_alpha,
+    _save_checkpoint(CHECKPOINT_FILE, pCount, particles, alpha_p, neumann_traction_y, params,
                      t, istep_start, ta, ka, sa, dda, aa, vtk_entries)
     print(f"Checkpoint saved  (next batch starts at step {istep_start})")
 
