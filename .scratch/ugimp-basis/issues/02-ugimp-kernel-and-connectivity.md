@@ -31,20 +31,32 @@ is correct and is locked in by a test below.
 
 **Status:** ready-for-agent
 
-- [ ] The uGIMP shape function returns the expected weight and gradient in each of the four
+- [x] The uGIMP shape function returns the expected weight and gradient in each of the four
       branches, verified by test
-- [ ] The shape function returns exactly zero weight and a zero gradient outside the support,
+- [x] The shape function returns exactly zero weight and a zero gradient outside the support,
       verified by test
-- [ ] The shape function reproduces the linear hat function at a cell centre when the particle
+- [x] The shape function reproduces the linear hat function at a cell centre when the particle
       domain equals the cell size, verified by test against the existing hat routine
-- [ ] The neighbour lookup returns 4 cells at a grid corner, 6 along an edge and 9 in the
+- [x] The neighbour lookup returns 4 cells at a grid corner, 6 along an edge and 9 in the
       interior, verified by test
-- [ ] The connectivity builder returns one entry per cell, each with no repeated nodes and no
+- [x] The connectivity builder returns one entry per cell, each with no repeated nodes and no
       out-of-range node index, verified by test at the border and in the interior
-- [ ] Weights sum to one and gradients sum to the zero vector for a particle in the grid
+- [x] Weights sum to one and gradients sum to the zero vector for a particle in the grid
       interior, verified by test
-- [ ] Tests fail loudly on their own — real assertions, not printed comparisons. Follow the
+- [x] Tests fail loudly on their own — real assertions, not printed comparisons. Follow the
       existing test module's directory, import idiom and main guard, but not its print-only
       style
-- [ ] No existing backbone routine is modified; the backbone diff shows additions only
-- [ ] All four existing drivers still import and run unchanged
+- [x] No existing backbone routine is modified; the backbone diff shows additions only
+- [x] All four existing drivers still import and run unchanged
+
+## Comments
+
+- `get_gimp2d_shape`, `_gimp_neighbour_cells` and `build_gimp_element_map` appended to
+  `src/solver_utilities.py`; the backbone diff is 94 insertions, 0 deletions.
+- Tests in `tests/test_gimp_basis.py`, following the existing module's import idiom and main
+  guard but asserting instead of printing.
+- The half-width that makes the middle branch empty is `lp = h/2` (particle domain *width*
+  equal to the cell size), matching the spec's wording; the issue body's "half-width equals
+  the cell size" would instead give a two-cell support.
+- Existing drivers verified by byte-checking the backbone diff and compiling all eight
+  driver scripts; they were not executed (each runs a full simulation).
