@@ -27,16 +27,26 @@ documentation.
 
 **Status:** ready-for-agent
 
-- [ ] The padded builder returns everything the existing builder returns, plus the plate origin
+- [x] The padded builder returns everything the existing builder returns, plus the plate origin
       offset and the plate cell counts
-- [ ] Every derived solver constant is identical to the unpadded builder's for the same
+- [x] Every derived solver constant is identical to the unpadded builder's for the same
       physical parameters, verified by test
-- [ ] Grid cell counts equal plate cell counts plus twice the pad width in each direction,
+- [x] Grid cell counts equal plate cell counts plus twice the pad width in each direction,
       verified by test
-- [ ] The plate origin offset equals the pad width times the cell size in each direction,
+- [x] The plate origin offset equals the pad width times the cell size in each direction,
       verified by test
-- [ ] A pad width of zero reproduces the unpadded grid exactly, verified by test
-- [ ] The routine's documentation states plainly which returned counts are the plate's and
+- [x] A pad width of zero reproduces the unpadded grid exactly, verified by test
+- [x] The routine's documentation states plainly which returned counts are the plate's and
       which are the grid's
-- [ ] Neither the default parameters nor the existing model builder is modified
-- [ ] Both existing Yvonnet drivers still run unchanged
+- [x] Neither the default parameters nor the existing model builder is modified
+- [x] Both existing Yvonnet drivers still run unchanged
+
+## Comments
+
+- `build_padded_model` appended to `src/yvonnet_model.py`; the backbone diff is 50 insertions,
+  0 deletions. Pad width is read from the `pad_cells` key.
+- The returned dict carries `pad_cells`, `plate_numx`, `plate_numy` and `plate_origin` on top
+  of everything `build_model` returns. Which counts are the plate's and which the grid's is
+  spelled out in the docstring.
+- The caller's params dict is copied, not mutated, so a driver can hand the same dict to the
+  checkpoint afterwards.

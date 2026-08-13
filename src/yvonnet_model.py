@@ -104,3 +104,53 @@ def build_model(params):
         dt_d_crit=dt_d_crit, dt_alpha_crit=dt_alpha_crit,
         dtime=dtime,
     )
+
+
+def build_padded_model(params):
+    """Build the model on a background grid enlarged by a ring of empty cells.
+
+    A uGIMP particle domain reaches further than the cell the particle sits in,
+    so a particle near a plate surface would deposit weight onto nodes past the
+    end of an exactly-sized grid. This grows the grid by `params['pad_cells']`
+    cells on all four sides and reports where the plate sits inside it.
+
+    Padding changes the grid extent and nothing else: build_model uses Lx and Ly
+    only to construct the mesh, and every solver constant it derives -- wave
+    speed, elastodynamic limit, both damage viscosities, both damage stability
+    limits and the time step -- depends on cell size, toughness and length scale
+    instead. A padded run and an unpadded run therefore take identical steps.
+
+    WHICH COUNTS ARE WHICH -- the one thing to get right here:
+
+      numx, numy, mesh          the PADDED GRID.  Use for grid assembly, for the
+                                connectivity map and for anything indexed by node
+                                or by cell.
+      plate_numx, plate_numy    the PLATE.  Use for seeding particles, for
+                                removing the notch and for detecting the boundary
+                                particles that carry the traction.
+      plate_origin             where the plate's corner sits in grid coordinates.
+                                Add it to a plate-local position to get a grid
+                                position; particles must be translated by it
+                                before their initial state is captured.
+
+    Reading numx where plate_numx was meant seeds particles into the pad ring and
+    silently destroys the point of padding, so the two are never interchangeable.
+    """
+    pad = int(params['pad_cells'])
+    hx, hy = params['hx'], params['hy']
+
+    plate_numx = int(round(params['Lx'] / hx))
+    plate_numy = int(round(params['Ly'] / hy))
+
+    padded_params = dict(params)
+    padded_params['Lx'] = params['Lx'] + 2.0 * pad * hx
+    padded_params['Ly'] = params['Ly'] + 2.0 * pad * hy
+
+    model = build_model(padded_params)
+
+    model['pad_cells'] = pad
+    model['plate_numx'] = plate_numx
+    model['plate_numy'] = plate_numy
+    model['plate_origin'] = np.array([pad * hx, pad * hy])
+
+    return model
