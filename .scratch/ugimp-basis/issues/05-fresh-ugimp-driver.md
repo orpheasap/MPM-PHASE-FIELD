@@ -39,18 +39,36 @@ by choosing which driver to run.
 
 **Status:** ready-for-agent
 
-- [ ] The driver runs to completion from a clean checkout and reports a nonzero maximum bulk
+- [x] The driver runs to completion from a clean checkout and reports a nonzero maximum bulk
       damage and interfacial damage
-- [ ] A VTK series and a checkpoint are written to an output directory distinct from the
+- [x] A VTK series and a checkpoint are written to an output directory distinct from the
       hat-basis driver's
-- [ ] The checkpoint records the particles-per-cell count, both particle domain half-widths and
+- [x] The checkpoint records the particles-per-cell count, both particle domain half-widths and
       the pad width alongside everything the existing checkpoint records
-- [ ] The uGIMP basis and nine-cell connectivity are used in all three loops, with the same node
+- [x] The uGIMP basis and nine-cell connectivity are used in all three loops, with the same node
       set in each
-- [ ] The particle domain half-widths are set once at seeding and never updated
-- [ ] Plate-local quantities (seeding, notch, Neumann rows) use plate cell counts; grid
+- [x] The particle domain half-widths are set once at seeding and never updated
+- [x] Plate-local quantities (seeding, notch, Neumann rows) use plate cell counts; grid
       assembly uses padded counts
-- [ ] The time step printed by the new driver equals the one printed by the existing Yvonnet
+- [x] The time step printed by the new driver equals the one printed by the existing Yvonnet
       driver for the same physical parameters
-- [ ] All four existing drivers still run unchanged, and the backbone diff shows additions only
-- [ ] No runtime flag, basis selector or configuration switch is introduced
+- [x] All four existing drivers still run unchanged, and the backbone diff shows additions only
+- [x] No runtime flag, basis selector or configuration switch is introduced
+
+## Comments
+
+- `Yvonnet_plate_gimp.py` at the repo root, mirroring `Yvonnet_plate.py` section for section;
+  `diff Yvonnet_plate.py Yvonnet_plate_gimp.py` is 155 changed lines, all of them basis, grid,
+  notch, output directory or comment.
+- Particle domain half-widths are `hx/2` and `hy/2` -- the *width* equals the cell size, which is
+  what makes the middle branch of the kernel empty and matches `tests/test_gimp_integration.py`.
+  The issue body's "half-width equals the cell size" would give a two-cell support instead; see
+  the same note on ticket 02.
+- Pad width 2 and the four-row notch match `PAD_CELLS` and `NOTCH_ROWS` pinned in 04. Layout comes
+  out as the test predicts: 9800 particles on a 104x104 grid, 200 removed for the notch.
+- Ran to completion: 100 steps, max bulk d = 0.0013, max interfacial alpha = 0.0007, two VTK
+  frames plus `checkpoint.npz` under `vtk_output_Yvonnet_gimp/`.
+- `dtime = 3.9917e-09 s`, identical to the hat-basis driver's, as `build_padded_model` guarantees.
+- `src/` is untouched by this commit. The four existing drivers were verified by compiling them
+  and by the empty backbone diff; they were not executed, since each runs a full simulation.
+- `.gitignore` gained `vtk_output_Yvonnet_gimp/`, matching the three existing output directories.
