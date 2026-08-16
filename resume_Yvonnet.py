@@ -13,11 +13,18 @@
 #
 #  After each batch the script saves the checkpoint + PVD and asks whether to
 #  continue.  Press 'y' (or wait 10 s) to run another batch; anything else stops.
+#
+#  Carries the same energy budget as Yvonnet_plate.py (see its header for the
+#  definitions).  The state functions (elastic, both crack surface energies) are
+#  recomputed each step; the cumulative ones (viscous dissipation, external work)
+#  continue from their last checkpointed value.  A checkpoint written before the
+#  budget existed is REJECTED rather than back-filled -- see the load block.
 # =============================================================================
 import os
 import msvcrt
 import time
 import numpy as np
+import matplotlib.pyplot as plt
 
 from src.particle import ParticleSet
 from src.solver_utilities import NodeState, get_mpm2d_shape, build_particle_element_map
@@ -73,7 +80,8 @@ def _input_with_timeout(prompt, timeout=10, default='y'):
 
 
 def _save_checkpoint(path, pCount, particles, alpha_p, neumann_traction_y, params,
-                     t, istep_start, ta, ka, sa, dda, aa, vtk_entries):
+                     t, istep_start, ta, ka, sa, dda, aa,
+                     ea, fda, faa, va, wa, vtk_entries):
     np.savez_compressed(
         path,
         pCount               = np.array(pCount),
@@ -97,6 +105,8 @@ def _save_checkpoint(path, pCount, particles, alpha_p, neumann_traction_y, param
         istep_start          = np.array(istep_start),
         ta = np.array(ta), ka = np.array(ka), sa = np.array(sa),
         dda = np.array(dda), aa = np.array(aa),
+        ea = np.array(ea), fda = np.array(fda), faa = np.array(faa),
+        va = np.array(va), wa = np.array(wa),
         vtk_times  = np.array([e[0] for e in vtk_entries]),
         vtk_fnames = np.array([e[1] for e in vtk_entries]),
     )
@@ -154,6 +164,31 @@ ka  = list(ckpt['ka'])
 sa  = list(ckpt['sa'])
 dda = list(ckpt['dda'])
 aa  = list(ckpt['aa'])
+
+# Energy budget series.  A checkpoint written before the budget existed has no
+# way to reconstruct them: the cumulative terms depend on the whole history that
+# was never recorded, and back-filling zeros would plot as a real flat baseline.
+# Fail loudly instead.
+_energy_keys = ('ea', 'fda', 'faa', 'va', 'wa')
+_missing = [k for k in _energy_keys if k not in ckpt.files]
+if _missing:
+    raise KeyError(
+        f"Checkpoint '{CHECKPOINT_FILE}' predates the energy budget: missing "
+        f"{_missing}.\n"
+        "These series cannot be reconstructed after the fact (the cumulative "
+        "terms depend on history that was never recorded).\n"
+        "Re-run Yvonnet_plate.py from step 0 to produce a checkpoint that "
+        "carries them."
+    )
+ea  = list(ckpt['ea'])
+fda = list(ckpt['fda'])
+faa = list(ckpt['faa'])
+va  = list(ckpt['va'])
+wa  = list(ckpt['wa'])
+
+# Cumulative terms resume from their last recorded value.
+E_visc_total = float(va[-1]) if va else 0.0
+W_ext_total  = float(wa[-1]) if wa else 0.0
 
 vtk_fnames  = [str(f) for f in ckpt['vtk_fnames']]
 vtk_entries = list(zip(ckpt['vtk_times'].tolist(), vtk_fnames))
@@ -250,6 +285,8 @@ while True:
         alpha_grid[has_pm]       = alpha_num[has_pm]      / node_state.pseudo_mass[has_pm]
 
         # --- Assemble both damage residuals ---
+        E_crack_d = 0.0      # crack surface energy, bulk        (state fn)
+        E_crack_a = 0.0      # crack surface energy, interfacial (state fn)
         for e in range(mesh.elemCount):
             esctr = mesh.element[e]
             for pid in mpoints[e]:
@@ -260,17 +297,30 @@ while True:
 
                 grad_d = np.zeros(2)
                 grad_a = np.zeros(2)
+                d_til  = 0.0
+                a_til  = 0.0
                 shp = []
                 for idn in esctr:
                     dx      = particles.positions[pid] - mesh.node[idn]
                     N, dNdx = get_mpm2d_shape(dx, hx, hy)
                     grad_d += dNdx * node_state.phase[idn]
                     grad_a += dNdx * alpha_grid[idn]
+                    d_til  += N * node_state.phase[idn]
+                    a_til  += N * alpha_grid[idn]
                     shp.append((idn, N, dNdx))
 
                 g_d     = (1.0 - d_p) ** 2
                 G_alpha = (1.0 - alpha_p[pid]) * g_d * float(eps_p @ (M2 @ eps_p))
                 omega_grad_a = omega_a @ grad_a
+
+                # Crack surface energies: both halves of each crack density
+                # taken from the grid field (d_til / a_til).
+                E_crack_d += gc_d * V0 * (
+                    d_til**2 + ell_d**2 * float(grad_d @ grad_d)
+                ) / (2.0 * ell_d)
+                E_crack_a += gc_alpha * V0 * (
+                    a_til**2 + ell_alpha**2 * float(grad_a @ omega_grad_a)
+                ) / (2.0 * ell_alpha)
 
                 for idn, N, dNdx in shp:
                     node_state.damage_force[idn] += (
@@ -287,6 +337,12 @@ while True:
         # --- Momentum update ---
         node_state.momentum += (node_state.internal_force + node_state.external_force) * dtime
 
+        # --- External work increment:  dW = dt sum_I f_I^ext . v_I ---
+        has_m = node_state.mass > tol
+        v_grid = np.zeros((mesh.nodeCount, 2))
+        v_grid[has_m] = node_state.momentum[has_m] / node_state.mass[has_m][:, None]
+        W_ext_total += dtime * float(np.sum(node_state.external_force * v_grid))
+
         # --- Explicit grid damage updates ---
         d_grid_new = node_state.phase.copy()
         a_grid_new = alpha_grid.copy()
@@ -296,6 +352,8 @@ while True:
         # --- G2P ---
         k = 0.0
         u = 0.0
+        E_el     = 0.0      # stored elastic on V0 (state fn)
+        visc_inc = 0.0      # viscous dissipation produced by this step
         for e in range(mesh.elemCount):
             for pid in mpoints[e]:
                 Lp    = np.zeros((2, 2))
@@ -314,12 +372,20 @@ while True:
                     d_new += N * d_grid_new[idn]
                     a_new += N * a_grid_new[idn]
 
+                d_old = particles.phase[pid]
+                a_old = alpha_p[pid]
                 d_new = min(max(d_new, 0.0), 1.0)
                 a_new = min(max(a_new, 0.0), 1.0)
-                d_new = max(particles.phase[pid], d_new)
-                a_new = max(alpha_p[pid],         a_new)
+                d_new = max(d_old, d_new)
+                a_new = max(a_old, a_new)
                 particles.phase[pid] = d_new
                 alpha_p[pid]         = a_new
+
+                # Viscous dissipation from the CLAMPED increments.
+                V0 = particles.initial_volume[pid]
+                visc_inc += V0 * (
+                    eta_d * (d_new - d_old)**2 + eta_alpha * (a_new - a_old)**2
+                ) / dtime
 
                 F = (I_mat + Lp * dtime) @ particles.deformation_gradient[pid].reshape(2, 2)
                 particles.deformation_gradient[pid] = F.reshape(4)
@@ -340,9 +406,16 @@ while True:
                 k += 0.5 * (particles.velocities[pid, 0]**2 + particles.velocities[pid, 1]**2) * particles.mass[pid]
                 u += 0.5 * particles.volume[pid] * particles.stress[pid] @ particles.strain[pid]
 
+                # Budget elastic energy: same integrand as u but on V0.
+                E_el += 0.5 * V0 * float(particles.stress[pid] @ particles.strain[pid])
+
+        E_visc_total += visc_inc
+
         ta.append(t); ka.append(k); sa.append(u)
         dda.append(float(np.max(particles.phase)))
         aa.append(float(np.max(alpha_p)))
+        ea.append(E_el);  fda.append(E_crack_d);  faa.append(E_crack_a)
+        va.append(E_visc_total);  wa.append(W_ext_total)
 
         if istep % vtk_interval == 0:
             fname = write_particles_vtp_aniso(
@@ -364,8 +437,12 @@ while True:
     print(f"simulation.pvd updated  ({len(vtk_entries)} frames total)")
 
     _save_checkpoint(CHECKPOINT_FILE, pCount, particles, alpha_p, neumann_traction_y, params,
-                     t, istep_start, ta, ka, sa, dda, aa, vtk_entries)
+                     t, istep_start, ta, ka, sa, dda, aa,
+                     ea, fda, faa, va, wa, vtk_entries)
     print(f"Checkpoint saved  (next batch starts at step {istep_start})")
+
+    print(f"  Energy [J/m]:  E_el = {ea[-1]:.4e}  |  E_crack = {fda[-1]+faa[-1]:.4e}"
+          f"  |  E_visc = {va[-1]:.4e}  |  W_ext = {wa[-1]:.4e}")
 
     ans = _input_with_timeout(
         f"\nContinue for {nsteps} more steps? [y/N]  (auto-continues in 10 s): ",
@@ -374,3 +451,42 @@ while True:
     if ans not in ('y', 'yes'):
         print("Stopping.")
         break
+
+
+# %%  ----- Energy budget plots (same figure as Yvonnet_plate.py) -----
+SHOW_PLOTS = False
+if SHOW_PLOTS:
+    t_us   = np.array(ta) * 1e6
+    e_el   = np.array(ea)
+    e_d    = np.array(fda)
+    e_a    = np.array(faa)
+    e_visc = np.array(va)
+    w_ext  = np.array(wa)
+    e_kin  = np.array(ka)
+
+    fig, axe = plt.subplots(1, 4, figsize=(22, 4.5))
+
+    axe[0].plot(t_us, e_el, color='tab:blue')
+    axe[0].set_title('Total elastic energy')
+
+    axe[1].plot(t_us, e_visc, color='tab:red')
+    axe[1].set_title('Viscous dissipation')
+
+    axe[2].plot(t_us, e_d,       label='bulk  $E_d$',             color='tab:orange')
+    axe[2].plot(t_us, e_a,       label=r'interfacial $E_\alpha$', color='tab:green')
+    axe[2].plot(t_us, e_d + e_a, label='total',          color='k', lw=2)
+    axe[2].set_title('Crack surface energy'); axe[2].legend(fontsize=8)
+
+    axe[3].stackplot(t_us, e_kin, e_el, e_d, e_a, e_visc,
+                     labels=['kinetic', 'elastic', 'crack surf. (bulk)',
+                             r'crack surf. (interf.)', 'viscous'],
+                     colors=['tab:purple', 'tab:blue', 'tab:orange',
+                             'tab:green', 'tab:red'], alpha=0.8)
+    axe[3].plot(t_us, w_ext, 'k--', lw=2, label='$W_{ext}$')
+    axe[3].set_title('Budget vs external work\n(drift diagnostic, not conservation)')
+    axe[3].legend(fontsize=8, loc='upper left')
+
+    for ax in axe:
+        ax.set_xlabel('Time [us]')
+        ax.set_ylabel('Energy per thickness [J/m]')
+    plt.tight_layout(); plt.show()

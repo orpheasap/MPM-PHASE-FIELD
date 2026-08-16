@@ -39,6 +39,35 @@
 #  Model parameters:
 #      theta = 60 deg,  ell_d = ell_alpha = 2h,  xi = 30,
 #      gc_d = 4e3 N/m,  gc_alpha = 1e3 N/m,  plane stress.
+#
+#  ---------------------------------------------------------------------------
+#  ENERGY BUDGET  (all terms per unit out-of-plane thickness -> J/m, since the
+#  plane-stress model carries no thickness).  Every integral is the same
+#  particle-side sum  sum_p (.) V0  so the terms are directly comparable:
+#
+#    E_el   = sum_p 1/2 V0 eps : sigma            stored elastic, sigma degraded
+#    E_d    = gc_d     sum_p V0 (d~^2 + ell_d^2 |grad d|^2) / (2 ell_d)
+#    E_a    = gc_alpha sum_p V0 (a~^2 + ell_a^2 grad a . omega_a grad a)/(2 ell_a)
+#    E_visc = sum_t sum_p V0 [eta_d (dd)^2 + eta_alpha (da)^2] / dt
+#    W_ext  = sum_t dt sum_I f_I^ext . v_I
+#
+#  E_d and E_a are the two CRACK SURFACE energies (bulk / interfacial); their
+#  sum is what the crack has cost.  E_visc is VISCOUS DISSIPATION -- a separate,
+#  non-physical cost of the eta*ddot regularisation, and NOT a crack surface
+#  energy.  d~ and a~ are the grid fields interpolated back to the particle, so
+#  each crack density uses one consistent representation for both its local and
+#  its gradient half.
+#
+#  K + E_el + E_d + E_a + E_visc is weighed against W_ext as a DRIFT DIAGNOSTIC,
+#  not a conservation check.  Four reasons exact closure is impossible here:
+#    1. the history field H = max psi_0 makes the bulk residual non-variational;
+#    2. the irreversibility clamp discards energy the grid update produced;
+#    3. W_ext uses a first-order rectangle rule (post-update nodal velocity);
+#    4. E_d and E_a are evaluated in the residual loop, i.e. from the grid
+#       fields at the START of the step -- that is the only place the grid
+#       gradients exist -- while K, E_el and E_visc in the same recorded row
+#       come from the END of it, so every row mixes t and t+dt by one step.
+#  A few percent drift is healthy; tens of percent means a term is wrong.
 # =============================================================================
 import os
 import numpy as np
@@ -244,6 +273,14 @@ vtk_dir     = 'vtk_output_Yvonnet'
 vtk_interval = 50
 
 ta, ka, sa, dda, aa = [], [], [], [], []   # time, kinetic, strain, max d, max alpha
+
+# Energy budget series (J/m -- per unit out-of-plane thickness):
+#   ea  elastic (degraded, on V0)   fda fracture bulk      faa fracture interfacial
+#   va  viscous dissipation (cum.)  wa  external work (cum.)
+ea, fda, faa, va, wa = [], [], [], [], []
+E_visc_total = 0.0     # running sum_t sum_p V0 [eta_d dd^2 + eta_a da^2]/dt
+W_ext_total  = 0.0     # running sum_t dt sum_I f_I^ext . v_I
+
 vtk_entries = []
 I_mat       = np.eye(2)
 mpoints     = particles.mpoints
@@ -291,6 +328,8 @@ for istep in range(nsteps):
     alpha_grid[has_pm]       = alpha_num[has_pm]      / node_state.pseudo_mass[has_pm]
 
     # --- Assemble both damage residuals F_I^d, F_I^alpha  (need grid gradients) -
+    E_crack_d = 0.0      # crack surface energy, bulk        (state fn, this step)
+    E_crack_a = 0.0      # crack surface energy, interfacial (state fn, this step)
     for e in range(mesh.elemCount):
         esctr = mesh.element[e]
         for pid in mpoints[e]:
@@ -299,15 +338,20 @@ for istep in range(nsteps):
             H_p   = particles.history[pid]
             eps_p = particles.strain[pid]           # Voigt [exx, eyy, gxy]
 
-            # grid gradients of d and alpha at the particle
+            # grid gradients of d and alpha at the particle, plus the grid fields
+            # interpolated back (d_til, a_til) for the crack-density local term
             grad_d = np.zeros(2)
             grad_a = np.zeros(2)
+            d_til  = 0.0
+            a_til  = 0.0
             shp = []
             for idn in esctr:
                 dx      = particles.positions[pid] - mesh.node[idn]
                 N, dNdx = get_mpm2d_shape(dx, hx, hy)
                 grad_d += dNdx * node_state.phase[idn]
                 grad_a += dNdx * alpha_grid[idn]
+                d_til  += N * node_state.phase[idn]
+                a_til  += N * alpha_grid[idn]
                 shp.append((idn, N, dNdx))
 
             # Interfacial driving energy  G^alpha = (1-alpha) g(d) eps:M2:eps  (eq. 39)
@@ -316,6 +360,15 @@ for istep in range(nsteps):
 
             # anisotropic flux omega_a . grad(alpha)
             omega_grad_a = omega_a @ grad_a
+
+            # Crack surface energies:  gc * V0 * gamma,  both halves of each
+            # crack density gamma taken from the grid field (d_til / a_til).
+            E_crack_d += gc_d * V0 * (
+                d_til**2 + ell_d**2 * float(grad_d @ grad_d)
+            ) / (2.0 * ell_d)
+            E_crack_a += gc_alpha * V0 * (
+                a_til**2 + ell_alpha**2 * float(grad_a @ omega_grad_a)
+            ) / (2.0 * ell_alpha)
 
             for idn, N, dNdx in shp:
                 # Bulk d residual (AT2):  (gc_d/ell_d) d N + gc_d ell_d (dN.grad d)
@@ -338,6 +391,13 @@ for istep in range(nsteps):
     # --- Update momenta (no Dirichlet BCs) -------------------------------------
     node_state.momentum += (node_state.internal_force + node_state.external_force) * dtime
 
+    # --- External work increment:  dW = dt sum_I f_I^ext . v_I  (post-update
+    #     nodal velocity -> first-order rectangle rule, biased O(dt) high) -----
+    has_m = node_state.mass > tol
+    v_grid = np.zeros((mesh.nodeCount, 2))
+    v_grid[has_m] = node_state.momentum[has_m] / node_state.mass[has_m][:, None]
+    W_ext_total += dtime * float(np.sum(node_state.external_force * v_grid))
+
     # --- Explicit grid damage updates (forward Euler on pseudo-mass) -----------
     d_grid_new = node_state.phase.copy()
     a_grid_new = alpha_grid.copy()
@@ -347,6 +407,8 @@ for istep in range(nsteps):
     # --- G2P: kinematics + map back both fields + stress/history (USL) ---------
     k = 0.0
     u = 0.0
+    E_el     = 0.0      # stored elastic on V0 (state fn, this step)
+    visc_inc = 0.0      # viscous dissipation produced by this step
     for e in range(mesh.elemCount):
         for pid in mpoints[e]:
             Lp    = np.zeros((2, 2))
@@ -368,12 +430,21 @@ for istep in range(nsteps):
                 a_new += N * a_grid_new[idn]
 
             # Map back, clamp to [0,1], enforce irreversibility (pointwise max)
+            d_old = particles.phase[pid]
+            a_old = alpha_p[pid]
             d_new = min(max(d_new, 0.0), 1.0)
             a_new = min(max(a_new, 0.0), 1.0)
-            d_new = max(particles.phase[pid], d_new)     # d_{t+dt} >= d_t
-            a_new = max(alpha_p[pid],         a_new)     # alpha_{t+dt} >= alpha_t
+            d_new = max(d_old, d_new)                    # d_{t+dt} >= d_t
+            a_new = max(a_old, a_new)                    # alpha_{t+dt} >= alpha_t
             particles.phase[pid] = d_new
             alpha_p[pid]         = a_new
+
+            # Viscous dissipation from the CLAMPED increments -- the ones that
+            # actually changed the state the other budget terms see.
+            V0 = particles.initial_volume[pid]
+            visc_inc += V0 * (
+                eta_d * (d_new - d_old)**2 + eta_alpha * (a_new - a_old)**2
+            ) / dtime
 
             # Kinematics
             F = (I_mat + Lp * dtime) @ particles.deformation_gradient[pid].reshape(2, 2)
@@ -398,9 +469,17 @@ for istep in range(nsteps):
             k += 0.5 * (particles.velocities[pid, 0]**2 + particles.velocities[pid, 1]**2) * particles.mass[pid]
             u += 0.5 * particles.volume[pid] * particles.stress[pid] @ particles.strain[pid]
 
+            # Budget elastic energy: same integrand as u but on V0, so every
+            # term of the budget uses one quadrature rule.
+            E_el += 0.5 * V0 * float(particles.stress[pid] @ particles.strain[pid])
+
+    E_visc_total += visc_inc
+
     ta.append(t); ka.append(k); sa.append(u)
     dda.append(float(np.max(particles.phase)))
     aa.append(float(np.max(alpha_p)))
+    ea.append(E_el);  fda.append(E_crack_d);  faa.append(E_crack_a)
+    va.append(E_visc_total);  wa.append(W_ext_total)
 
     if istep % vtk_interval == 0:
         # Fields written: velocity, von_mises, phase_d (=d), phase_a (=alpha), history.
@@ -418,6 +497,22 @@ print("\nSolver completed.")
 print(f"Steps: {nsteps},  VTK frames: {len(vtk_entries)}")
 print(f"Max bulk damage d reached:        {max(dda):.4f}")
 print(f"Max interfacial damage alpha:     {max(aa):.4f}")
+
+print_section("Energy Budget at t_final  (J/m, per unit thickness)")
+print(f"Kinetic                K       = {ka[-1]:.6e}")
+print(f"Elastic (degraded)     E_el    = {ea[-1]:.6e}")
+print(f"Crack surface, bulk    E_d     = {fda[-1]:.6e}")
+print(f"Crack surface, interf. E_a     = {faa[-1]:.6e}")
+print(f"Crack surface, total   E_crack = {fda[-1] + faa[-1]:.6e}")
+print(f"Viscous dissipation    E_visc  = {va[-1]:.6e}")
+print(f"External work          W_ext   = {wa[-1]:.6e}")
+_accounted = ka[-1] + ea[-1] + fda[-1] + faa[-1] + va[-1]
+_drift  = _accounted - wa[-1]
+print(f"Sum - W_ext (drift)            = {_drift:.6e}"
+      + (f"   ({100.0*_drift/wa[-1]:+.2f} % of W_ext)" if abs(wa[-1]) > 0.0 else ""))
+print("NOTE: drift diagnostic only -- the history field, the irreversibility")
+print("      clamp, the O(dt) work rule and the one-step lag on E_d/E_a make")
+print("      exact closure impossible.  See the header for all four.")
 
 
 # ----- Checkpoint -----
@@ -445,6 +540,8 @@ np.savez_compressed(
     istep_start          = np.array(nsteps),
     ta = np.array(ta), ka = np.array(ka), sa = np.array(sa),
     dda = np.array(dda), aa = np.array(aa),
+    ea = np.array(ea), fda = np.array(fda), faa = np.array(faa),
+    va = np.array(va), wa = np.array(wa),
     vtk_times  = np.array([e[0] for e in vtk_entries]),
     vtk_fnames = np.array([e[1] for e in vtk_entries]),
 )
@@ -456,6 +553,8 @@ print(f"VTK output: {pvd_path}")
 solver_results = {
     'time': np.array(ta), 'kinetic': np.array(ka), 'strain': np.array(sa),
     'bulk_damage': np.array(dda), 'interf_damage': np.array(aa),
+    'elastic': np.array(ea), 'crack_bulk': np.array(fda), 'crack_interf': np.array(faa),
+    'viscous': np.array(va), 'ext_work': np.array(wa),
     'vtk_entries': vtk_entries,
 }
 
@@ -471,6 +570,41 @@ if SHOW_PLOTS:
     axes[3].plot(t_us, solver_results['interf_damage']); axes[3].set_title('Max interfacial alpha')
     for ax in axes:
         ax.set_xlabel('Time [us]')
+    plt.tight_layout(); plt.show()
+
+    # ----- Energy budget (J/m -- per unit out-of-plane thickness) -----
+    e_el   = solver_results['elastic']
+    e_d    = solver_results['crack_bulk']
+    e_a    = solver_results['crack_interf']
+    e_visc = solver_results['viscous']
+    w_ext  = solver_results['ext_work']
+    e_kin  = solver_results['kinetic']
+
+    fig, axe = plt.subplots(1, 4, figsize=(22, 4.5))
+
+    axe[0].plot(t_us, e_el, color='tab:blue')
+    axe[0].set_title('Total elastic energy')
+
+    axe[1].plot(t_us, e_visc, color='tab:red')
+    axe[1].set_title('Viscous dissipation')
+
+    axe[2].plot(t_us, e_d,       label='bulk  $E_d$',          color='tab:orange')
+    axe[2].plot(t_us, e_a,       label=r'interfacial $E_\alpha$', color='tab:green')
+    axe[2].plot(t_us, e_d + e_a, label='total',        color='k', lw=2)
+    axe[2].set_title('Crack surface energy'); axe[2].legend(fontsize=8)
+
+    axe[3].stackplot(t_us, e_kin, e_el, e_d, e_a, e_visc,
+                     labels=['kinetic', 'elastic', 'crack surf. (bulk)',
+                             r'crack surf. (interf.)', 'viscous'],
+                     colors=['tab:purple', 'tab:blue', 'tab:orange',
+                             'tab:green', 'tab:red'], alpha=0.8)
+    axe[3].plot(t_us, w_ext, 'k--', lw=2, label='$W_{ext}$')
+    axe[3].set_title('Budget vs external work\n(drift diagnostic, not conservation)')
+    axe[3].legend(fontsize=8, loc='upper left')
+
+    for ax in axe:
+        ax.set_xlabel('Time [us]')
+        ax.set_ylabel('Energy per thickness [J/m]')
     plt.tight_layout(); plt.show()
 
     fig, (axd, axa) = plt.subplots(2, 1, figsize=(14, 10))

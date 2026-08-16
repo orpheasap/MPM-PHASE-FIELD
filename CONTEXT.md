@@ -85,3 +85,33 @@ stiffness anisotropically, whereas bulk damage degrades it uniformly.
 _Avoid_: micro damage, interface phase field, alpha
 _Not to be confused with_: bulk damage. A point can be fully debonded at its interfaces
 while its surrounding bulk is still intact.
+
+### Energy accounting
+
+**Crack surface energy**:
+The energy stored in the damage field itself — the smeared stand-in for the surface energy of
+a real crack, obtained by weighting a damage field's regularised crack density by its
+toughness. There is one per damage field, so a two-field run has a bulk and an interfacial
+crack surface energy, each on its own toughness and length scale. It is a state function: it
+depends only on the current damage fields, never on the path taken to reach them.
+_Avoid_: dissipated energy, damage energy, surface energy
+_Not to be confused with_: viscous dissipation, which is also irreversible but is a cost of
+the numerical scheme rather than a property of the crack.
+
+**Viscous dissipation**:
+The energy consumed by the micro-forces that turn the damage stationarity conditions into
+evolution equations. It is an artefact of the regularisation, not a physical fracture cost,
+and it vanishes as the damage rates go to zero — so a run in which it is comparable to the
+crack surface energy is one whose viscosities are distorting the physics rather than merely
+stabilising the march. Unlike crack surface energy it accumulates over time, and so cannot be
+recovered from a snapshot of the fields.
+_Avoid_: dissipated energy, damping energy, numerical dissipation
+_Not to be confused with_: crack surface energy.
+
+**Energy budget**:
+The named set of terms — kinetic, stored elastic, the crack surface energies, and viscous
+dissipation — that is weighed against the work done by the applied loads. The comparison is a
+drift diagnostic rather than a conservation law: the model deliberately contains steps that
+neither store nor account for energy, so the budget is expected to miss, and it is the *size*
+of the miss that carries the information.
+_Avoid_: dissipated energy, energy balance, energy conservation, closure
