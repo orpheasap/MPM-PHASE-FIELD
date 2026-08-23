@@ -23,7 +23,7 @@ DEFAULT_PARAMS = dict(
     # --- Fracture (phase-field) properties ---
     gc_d=10.0, gc_alpha=1.0,
     # --- Background grid ---
-    Lx=0.01, Ly=0.01, hx=0.1e-3, hy=0.1e-3,
+    Lx=0.01, Ly=0.01, hx=0.2e-3, hy=0.2e-3,
     ell_d=0.2e-3, ell_alpha=0.2e-3,
     # --- Loading / geometry (kept for record; baked into particle state) ---
     sigma=2.0e6, notch_length=0.005,
