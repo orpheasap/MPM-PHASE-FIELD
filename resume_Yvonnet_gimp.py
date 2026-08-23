@@ -230,7 +230,7 @@ dt_alpha_crit = model['dt_alpha_crit']
 dtime         = model['dtime']
 CFL           = params['CFL']
 
-nsteps = int(os.environ.get('PF_NSTEPS', 500))   # steps per batch (override via env var)
+nsteps = int(os.environ.get('PF_NSTEPS', 100))   # steps per batch (override via env var)
 
 print_section("Solver Parameters")
 print(f"c_d = {c_d:.4e} m/s")

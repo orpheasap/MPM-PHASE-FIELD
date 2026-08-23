@@ -24,7 +24,6 @@ import os
 import msvcrt
 import time
 import numpy as np
-import matplotlib.pyplot as plt
 
 from src.particle import ParticleSet
 from src.solver_utilities import NodeState, get_mpm2d_shape, build_particle_element_map
@@ -453,40 +452,8 @@ while True:
         break
 
 
-# %%  ----- Energy budget plots (same figure as Yvonnet_plate.py) -----
-SHOW_PLOTS = False
-if SHOW_PLOTS:
-    t_us   = np.array(ta) * 1e6
-    e_el   = np.array(ea)
-    e_d    = np.array(fda)
-    e_a    = np.array(faa)
-    e_visc = np.array(va)
-    w_ext  = np.array(wa)
-    e_kin  = np.array(ka)
-
-    fig, axe = plt.subplots(1, 4, figsize=(22, 4.5))
-
-    axe[0].plot(t_us, e_el, color='tab:blue')
-    axe[0].set_title('Total elastic energy')
-
-    axe[1].plot(t_us, e_visc, color='tab:red')
-    axe[1].set_title('Viscous dissipation')
-
-    axe[2].plot(t_us, e_d,       label='bulk  $E_d$',             color='tab:orange')
-    axe[2].plot(t_us, e_a,       label=r'interfacial $E_\alpha$', color='tab:green')
-    axe[2].plot(t_us, e_d + e_a, label='total',          color='k', lw=2)
-    axe[2].set_title('Crack surface energy'); axe[2].legend(fontsize=8)
-
-    axe[3].stackplot(t_us, e_kin, e_el, e_d, e_a, e_visc,
-                     labels=['kinetic', 'elastic', 'crack surf. (bulk)',
-                             r'crack surf. (interf.)', 'viscous'],
-                     colors=['tab:purple', 'tab:blue', 'tab:orange',
-                             'tab:green', 'tab:red'], alpha=0.8)
-    axe[3].plot(t_us, w_ext, 'k--', lw=2, label='$W_{ext}$')
-    axe[3].set_title('Budget vs external work\n(drift diagnostic, not conservation)')
-    axe[3].legend(fontsize=8, loc='upper left')
-
-    for ax in axe:
-        ax.set_xlabel('Time [us]')
-        ax.set_ylabel('Energy per thickness [J/m]')
-    plt.tight_layout(); plt.show()
+# %%  ----- Post-processing -----
+# All figures live in `plot_energy_budget.py`, which reads the checkpoint written
+# at the end of each batch above -- including the full series carried over from
+# every earlier batch:
+#     python plot_energy_budget.py

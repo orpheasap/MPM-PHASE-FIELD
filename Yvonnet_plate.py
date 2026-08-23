@@ -71,7 +71,6 @@
 # =============================================================================
 import os
 import numpy as np
-import matplotlib.pyplot as plt
 import shutil
 
 from src.mesh2D import Mesh
@@ -559,61 +558,7 @@ solver_results = {
 }
 
 
-# %%  ----- Post-processing (optional) -----
-SHOW_PLOTS = False
-if SHOW_PLOTS:
-    t_us  = solver_results['time'] * 1e6
-    fig, axes = plt.subplots(1, 4, figsize=(20, 4))
-    axes[0].plot(t_us, solver_results['kinetic']); axes[0].set_title('Kinetic energy')
-    axes[1].plot(t_us, solver_results['strain']);  axes[1].set_title('Strain energy')
-    axes[2].plot(t_us, solver_results['bulk_damage']);   axes[2].set_title('Max bulk d')
-    axes[3].plot(t_us, solver_results['interf_damage']); axes[3].set_title('Max interfacial alpha')
-    for ax in axes:
-        ax.set_xlabel('Time [us]')
-    plt.tight_layout(); plt.show()
-
-    # ----- Energy budget (J/m -- per unit out-of-plane thickness) -----
-    e_el   = solver_results['elastic']
-    e_d    = solver_results['crack_bulk']
-    e_a    = solver_results['crack_interf']
-    e_visc = solver_results['viscous']
-    w_ext  = solver_results['ext_work']
-    e_kin  = solver_results['kinetic']
-
-    fig, axe = plt.subplots(1, 4, figsize=(22, 4.5))
-
-    axe[0].plot(t_us, e_el, color='tab:blue')
-    axe[0].set_title('Total elastic energy')
-
-    axe[1].plot(t_us, e_visc, color='tab:red')
-    axe[1].set_title('Viscous dissipation')
-
-    axe[2].plot(t_us, e_d,       label='bulk  $E_d$',          color='tab:orange')
-    axe[2].plot(t_us, e_a,       label=r'interfacial $E_\alpha$', color='tab:green')
-    axe[2].plot(t_us, e_d + e_a, label='total',        color='k', lw=2)
-    axe[2].set_title('Crack surface energy'); axe[2].legend(fontsize=8)
-
-    axe[3].stackplot(t_us, e_kin, e_el, e_d, e_a, e_visc,
-                     labels=['kinetic', 'elastic', 'crack surf. (bulk)',
-                             r'crack surf. (interf.)', 'viscous'],
-                     colors=['tab:purple', 'tab:blue', 'tab:orange',
-                             'tab:green', 'tab:red'], alpha=0.8)
-    axe[3].plot(t_us, w_ext, 'k--', lw=2, label='$W_{ext}$')
-    axe[3].set_title('Budget vs external work\n(drift diagnostic, not conservation)')
-    axe[3].legend(fontsize=8, loc='upper left')
-
-    for ax in axe:
-        ax.set_xlabel('Time [us]')
-        ax.set_ylabel('Energy per thickness [J/m]')
-    plt.tight_layout(); plt.show()
-
-    fig, (axd, axa) = plt.subplots(2, 1, figsize=(14, 10))
-    scd = axd.scatter(particles.positions[:, 0], particles.positions[:, 1],
-                      s=1.0, c=particles.phase, cmap='inferno', vmin=0, vmax=1, rasterized=True)
-    plt.colorbar(scd, ax=axd, label='bulk damage d'); axd.set_aspect('equal')
-    axd.set_title(f'Bulk damage d  (theta = {theta_deg} deg)')
-    sca = axa.scatter(particles.positions[:, 0], particles.positions[:, 1],
-                      s=1.0, c=alpha_p, cmap='viridis', vmin=0, vmax=1, rasterized=True)
-    plt.colorbar(sca, ax=axa, label='interfacial damage alpha'); axa.set_aspect('equal')
-    axa.set_title(f'Interfacial damage alpha  (theta = {theta_deg} deg)')
-    plt.tight_layout(); plt.show()
+# %%  ----- Post-processing -----
+# All figures live in `plot_energy_budget.py`, which reads the checkpoint written
+# above.  Plotting therefore costs no simulation:
+#     python plot_energy_budget.py
