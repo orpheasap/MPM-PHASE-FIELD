@@ -53,6 +53,12 @@ tests compare with tolerances, never with equality.
   hypoelastic ε, σ₀, degraded σ, history field).
 - `warp_usl_pf.py` — the USL step kernels with bulk damage and nominal traction, and the
   `run_warp_pf_solver` time loop.
+- `warp_usl_aniso.py` — the two-field (bulk damage d + anisotropic interfacial damage α) USL step
+  of the Yvonnet plate, SI units, plane stress: two-field reset, `p2g_aniso`,
+  `grid_two_field_project`, `damage_residual_two_field` (one gather of ∇d, ∇α, d̃, α̃; scatters
+  F^d and F^α; writes both crack surface energies), `grid_update_aniso`, `g2p_aniso`, the
+  total-strain `stress_update_aniso` (σ₀ = C_a(α) : ε recomputed each step), and the
+  `run_warp_aniso_solver` time loop.
 - `phasefield.py` — host-side phase-field constants, copied from `serial_py/src/phasefield.py`.
 
 New capabilities arrive as new `warp_*.py` modules or new functions (after the freeze, see

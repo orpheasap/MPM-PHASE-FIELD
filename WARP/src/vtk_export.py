@@ -95,3 +95,28 @@ def write_particles_vtp_pf(xp, vp, sigma, nu, phi, H, step, t, out_dir):
     fname = f"particles_{step:05d}.vtp"
     cloud.save(os.path.join(out_dir, fname))
     return fname
+
+
+def write_particles_vtp_aniso(xp, vp, sigma, d, alpha, H, step, t, out_dir):
+    """Write one .vtp file for a two-field phase-field Warp step: velocity, von_mises,
+    bulk_damage, interfacial_damage, history.
+
+    sigma: (n, 3) degraded Cauchy stress in Voigt order (xx, yy, xy), small-strain plane stress
+    (sigma_zz = 0).
+    """
+    os.makedirs(out_dir, exist_ok=True)
+
+    pts   = np.column_stack([xp, np.zeros(len(xp))])
+    cloud = pv.PolyData(pts)
+
+    cloud["velocity"] = np.column_stack([vp, np.zeros(len(xp))])
+
+    s_xx, s_yy, s_xy = sigma[:, 0], sigma[:, 1], sigma[:, 2]
+    cloud["von_mises"] = np.sqrt(s_xx**2 - s_xx * s_yy + s_yy**2 + 3.0 * s_xy**2)
+    cloud["bulk_damage"]        = np.asarray(d)
+    cloud["interfacial_damage"] = np.asarray(alpha)
+    cloud["history"]            = np.asarray(H)
+
+    fname = f"particles_{step:05d}.vtp"
+    cloud.save(os.path.join(out_dir, fname))
+    return fname
