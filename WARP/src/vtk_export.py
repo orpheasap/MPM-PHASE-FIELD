@@ -47,3 +47,26 @@ def write_pvd(out_dir, entries):
         f.write('</Collection>\n')
         f.write('</VTKFile>\n')
     return pvd_path
+
+
+def write_particles_vtp_elastic(xp, vp, sigma, J, step, t, out_dir):
+    """Write one .vtp file for an elastic Warp step: velocity, von_mises, pressure, J.
+
+    sigma: (n, 3, 3) Cauchy stress, including sigma_zz (plane strain).
+    """
+    os.makedirs(out_dir, exist_ok=True)
+
+    pts   = np.column_stack([xp, np.zeros(len(xp))])
+    cloud = pv.PolyData(pts)
+
+    cloud["velocity"] = np.column_stack([vp, np.zeros(len(xp))])
+
+    p   = -np.trace(sigma, axis1=1, axis2=2) / 3.0
+    dev = sigma + p[:, None, None] * np.eye(3)
+    cloud["von_mises"] = np.sqrt(1.5 * np.sum(dev * dev, axis=(1, 2)))
+    cloud["pressure"]  = p
+    cloud["J"]         = J
+
+    fname = f"particles_{step:05d}.vtp"
+    cloud.save(os.path.join(out_dir, fname))
+    return fname
