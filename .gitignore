@@ -6,6 +6,10 @@ vtk_output_Yvonnet/
 vtk_output_Yvonnet_gimp/
 vtk_output_warp/
 desktop.ini
+
+vtk_output*/
+*.csv
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

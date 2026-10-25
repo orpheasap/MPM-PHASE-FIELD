@@ -44,7 +44,7 @@ half-widths, including one domain spanning a cell boundary and one clamped at th
 - [x] `python CopperTaylorImpact.py` still runs (numpy reference unaffected);
       `git diff -- WARP/src/` shows only new files and the appended VTK writer.
 - [x] cpGIMP pytest passes.
-- [ ] On pass, set `Freeze date:` in `WARP/CLAUDE.md` (the Warp backbone becomes additive).
+- [x] On pass, set `Freeze date:` in `WARP/CLAUDE.md` (the Warp backbone becomes additive).
 
 **Blocked by:** None — can start immediately.
 
@@ -101,3 +101,12 @@ driver has the same issue.
 
 **Decision needed:** accept the scheme's ~11 % loss and revisit the energy tolerance, or try
 refining (finer grid / more particles per cell) before freezing the Warp backbone.
+
+### 2026-10-25 — energy check resolved by refinement (researcher)
+
+Commit `7a1c629`: the grid was refined from 1 mm to 0.5 mm cells (25 × 36 → 50 × 72) and the
+particle mesh from 15 × 50 to 60 × 200 (750 → 12000 particles, 1 GP each). With this resolution
+the energy drift is **below 5 %** of E_kin(0), so the energy check passes. The 5 % tolerance was not
+changed. This confirms that the earlier ~11.5 % loss was spatial (grid-transfer and wall-clamp
+dissipation at coarse resolution), not a bug. All three checks now pass, so the Warp backbone
+is frozen (see `WARP/CLAUDE.md`).

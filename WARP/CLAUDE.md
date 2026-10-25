@@ -29,7 +29,9 @@ project is the reference every Warp result is checked against — see
   signatures and behaviour stay untouched, and every Warp driver keeps running. Record the freeze
   date here when it happens.
 
-Freeze date: _not yet frozen_.
+Freeze date: **2026-10-25** — the elastic Taylor bar passed all three checks (energy drift < 5 %
+after refining to 0.5 mm cells, commit `7a1c629`). `warp_gimp.py`, `warp_hencky.py` and
+`warp_usl.py` now take additive changes only; new capabilities go into new `warp_*.py` modules.
 
 ### Drivers hard-code their choices
 

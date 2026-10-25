@@ -104,6 +104,11 @@ _Avoid_: micro damage, interface phase field, alpha
 _Not to be confused with_: bulk damage. A point can be fully debonded at its interfaces
 while its surrounding bulk is still intact.
 
+**History field**:
+The running maximum, over a particle's past, of its undamaged elastic energy density. It is
+what drives bulk damage, and because it never decreases, unloading cannot heal a crack.
+_Avoid_: H, driving force, psi-plus
+
 ### Energy accounting
 
 **Crack surface energy**:

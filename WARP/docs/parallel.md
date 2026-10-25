@@ -33,7 +33,9 @@ tests compare with tolerances, never with equality.
   grid reset and grid updates (momentum update, rigid wall).
 - P2G loops over the particle's 3×3 cpGIMP stencil from its lower-left support corner (GeoWarp
   style) and writes nodal quantities with `wp.atomic_add`. G2P loops over the same stencil and only
-  reads the grid, so it needs no atomics.
+  reads the grid, so it needs no atomics for grid data; per-step scalar diagnostics (e.g. φ_max,
+  viscous dissipation) may still be reduced into a per-step device array with `wp.atomic_max` /
+  `wp.atomic_add`.
 - Nodes are indexed flat: `ix + iy * (n_grid_x + 1)`.
 - The background grid has **square cells** (one `dx`) — the cpGIMP kernel assumes it.
 - Shape functions are `@wp.func`s shared by P2G and G2P, so both see the same weights.
@@ -44,6 +46,14 @@ tests compare with tolerances, never with equality.
   (ported from GeoWarp).
 - `warp_hencky.py` — Hencky elastic stress and the elastic material parameters.
 - `warp_usl.py` — the USL step kernels and the `run_warp_solver` time loop.
+- `warp_phasefield.py` — AT2 `@wp.func`s (g, g′, w, w′) and the bulk-damage kernels
+  `grid_phase_project` and `damage_residual`. Each sits behind a device-wide barrier (∇φ needs
+  every φ_I, the φ update needs every F_I), so each is its own kernel.
+- `warp_small_strain.py` — plane-strain elasticity matrix and `stress_update_pf` (small-strain
+  hypoelastic ε, σ₀, degraded σ, history field).
+- `warp_usl_pf.py` — the USL step kernels with bulk damage and nominal traction, and the
+  `run_warp_pf_solver` time loop.
+- `phasefield.py` — host-side phase-field constants, copied from the root `src/phasefield.py`.
 
 New capabilities arrive as new `warp_*.py` modules or new functions (after the freeze, see
 `../CLAUDE.md`).
