@@ -34,8 +34,16 @@ _Avoid_: material point, marker, node
 The rectangular patch of material a particle is taken to occupy, described by a half-width
 in each direction. A particle is a point for the physics but a patch for the interpolation.
 Whether the patch is held fixed at its seeded size or convected with the deformation is a
-choice a driver makes.
+choice a driver makes. Near the edge of the background grid, or against a rigid wall, the
+patch may be clamped — shrunk so that it does not cross the edge — without changing the
+particle's mass or volume; only its reach for interpolation shrinks.
 _Avoid_: particle volume, particle footprint, cell of the particle
+
+**Convected particle domain**:
+A particle domain whose half-widths follow the stretch of the material in each direction,
+so that the patch lengthens or thins as the particle deforms. It is the alternative to a
+domain held at its seeded size.
+_Avoid_: deformed domain, updated domain
 
 **Support**:
 The region over which a particle's shape function is nonzero — equivalently, the set of
@@ -63,6 +71,16 @@ The pre-existing crack introduced into the plate before the run starts, formed b
 a region unseeded so that no material occupies it. It is a hole in the body, not a damaged
 region: it exists in the initial geometry rather than emerging from the damage fields.
 _Avoid_: pre-crack, slit, initial flaw
+
+**Rigid wall**:
+An immovable, frictionless boundary that material may separate from but never pass through.
+It acts on the background grid, not on particles: on the wall's row of nodes it blocks only
+motion into the wall, leaving motion along it and away from it free. Because the grid
+carries it, contact begins once a particle's support reaches the wall, slightly before the
+material itself touches.
+_Avoid_: floor, rigid floor, contact boundary
+_Not to be confused with_: a fixed (Dirichlet) boundary, which holds the material in place
+and would not let it rebound.
 
 ### Solution fields
 

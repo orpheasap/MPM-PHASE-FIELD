@@ -22,6 +22,14 @@ The scripts *outside* `src/` are the applications, and they pick which backbone 
 hard-coding them. Do not add runtime flags, basis selectors, or config switches so a driver can
 choose at run time — switching is done by editing the driver.
 
+### `WARP/` is a separate sub-project
+
+`WARP/` is the GPU (NVIDIA Warp) staging ground, with its own backbone in `WARP/src/` and its own
+drivers in `WARP/`. The rules above cover the root `src/` and root drivers only; `WARP/` has its
+own rules in `WARP/CLAUDE.md` — read it before touching anything under `WARP/`. Root code never
+imports from `WARP/`, and `WARP/` never imports from the root `src/`. See
+`docs/adr/0001-warp-is-a-gpu-staging-ground.md`.
+
 ## Agent skills
 
 ### Issue tracker
