@@ -45,8 +45,8 @@ V0    = 190.0     # impact velocity (m/s), downward
 # Square 1 mm cells. Node row y = dx is the rigid wall, the row below it is a pad ring.
 # 36 cells high (not 31): an elastic bar rebounds at ~V0, so over 40 µs its top rises ~5 mm
 # above where it started and would leave a 31-cell grid.
-dx         = 1.0e-3
-numx, numy = 25, 36
+dx         = 0.5e-3
+numx, numy = 50, 72
 Lx, Ly     = numx * dx, numy * dx
 
 mesh = Mesh(Lx, Ly, numx, numy)
@@ -56,7 +56,7 @@ print(f"Grid:   {numx} × {numy}  ({mesh.deltax*1e3:.1f} mm cells)")
 print(f"Rigid wall: node row y = {dx*1e3:.1f} mm;  pad ring below it")
 
 # ----- Particle mesh -----
-noX, noY = 15, 50                       # 750 elements × 1 GP = 750 particles
+noX, noY = 60, 200#15, 50                       # 750 elements × 1 GP = 750 particles
 pmesh = Mesh(D_bar, L_bar, noX, noY)
 pmesh.node[:, 0] += Lx/2 - D_bar/2      # centre bar horizontally
 pmesh.node[:, 1] += dx + .1*1e-3        # bar bottom 0.1 mm above the rigid wall
