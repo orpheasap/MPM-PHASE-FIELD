@@ -1,5 +1,5 @@
 # Explicit USL MPM with AT2 bulk damage on the GPU: cpGIMP basis, small-strain hypoelasticity,
-# nominal traction, pure FLIP. Port of the root pre_noched_plate_PF.py (Algorithm 1).
+# nominal traction, pure FLIP. Port of serial_py/pre_noched_plate_PF.py (Algorithm 1).
 #
 # One step:
 #   reset_grid_pf -> p2g_pf (mass, momentum, degraded internal force, traction, pseudo-mass,

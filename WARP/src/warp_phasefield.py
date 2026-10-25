@@ -1,6 +1,6 @@
 # AT2 bulk damage for the Warp backbone: the constitutive functions and the two grid-side
 # damage kernels of the explicit USL-MPM-PF step (Algorithm 1 of explicit_USL_MPM_PF.tex,
-# as in the root pre_noched_plate_PF.py).
+# as in serial_py/pre_noched_plate_PF.py).
 #
 #   g(phi) = (1 - phi)^2,  w(phi) = phi^2,  c_w = 1/2
 #   F_I    = sum_p [g'(phi_p) w_I H_p + c (1/2 w'(phi_p) w_I + l^2 grad w_I . grad phi_p)] V0_p

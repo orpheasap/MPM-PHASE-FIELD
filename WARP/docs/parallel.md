@@ -53,7 +53,7 @@ tests compare with tolerances, never with equality.
   hypoelastic ε, σ₀, degraded σ, history field).
 - `warp_usl_pf.py` — the USL step kernels with bulk damage and nominal traction, and the
   `run_warp_pf_solver` time loop.
-- `phasefield.py` — host-side phase-field constants, copied from the root `src/phasefield.py`.
+- `phasefield.py` — host-side phase-field constants, copied from `serial_py/src/phasefield.py`.
 
 New capabilities arrive as new `warp_*.py` modules or new functions (after the freeze, see
 `../CLAUDE.md`).

@@ -162,7 +162,7 @@ def run_warp_solver(mesh, particles, material, dtime, time, alpha,
     lp0        — (n, 2) initial particle-domain half-widths.
 
     Output (VTK, tracked particles, energy) happens at t = 0 and every `vtk_interval` steps,
-    plus the last step. Returns a dict in the style of run_mpm_solver.
+    plus the last step. Returns a dict of results.
     """
     if not np.isclose(mesh.deltax, mesh.deltay):
         raise ValueError("cpGIMP needs square background cells")

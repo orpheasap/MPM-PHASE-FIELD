@@ -1,5 +1,5 @@
 # Small-strain hypoelastic plane-strain elasticity with AT2 degradation, for the Warp backbone.
-# Port of the stress update of the root pre_noched_plate_PF.py (Voigt, engineering shear):
+# Port of the stress update of serial_py/pre_noched_plate_PF.py (Voigt, engineering shear):
 #
 #   d eps = sym(L) dt,  eps += d eps,  sigma0 += C : d eps,  sigma = (g(phi) + kappa) sigma0
 #   H = max(H, 1/2 sigma0 : eps)       (history field, no tension/compression split)

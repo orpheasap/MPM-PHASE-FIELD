@@ -1,4 +1,4 @@
-# Copied from the root src/phasefield.py (host-side AT1/AT2 constants and stability limit), so that
+# Copied from serial_py/src/phasefield.py (host-side AT1/AT2 constants and stability limit), so that
 # WARP/ stays self-contained (WARP/CLAUDE.md). The device-side AT2 functions are in warp_phasefield.py.
 """
 Phase-field fracture helpers for the explicit USL-MPM-PF scheme.

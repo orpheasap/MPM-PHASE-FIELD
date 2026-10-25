@@ -2,7 +2,7 @@
 # =============================================================================
 #  Pre-notched plate  --  Explicit USL-MPM with AT2 phase-field fracture, on the GPU
 #
-#  Warp port of the root `pre_noched_plate_PF.py` (Algorithm 1 of
+#  Warp port of `serial_py/pre_noched_plate_PF.py` (Algorithm 1 of
 #  `explicit_USL_MPM_PF.tex`), with the cpGIMP basis and a convected particle
 #  domain. Spec: .scratch/warp-phase-field-plate/spec.md.
 #
