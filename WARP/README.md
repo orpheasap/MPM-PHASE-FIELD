@@ -2,14 +2,13 @@
 
 The GPU staging ground of the MPM phase-field project. Explicit MPM kernels are written in
 [NVIDIA Warp](https://nvidia.github.io/warp/) and grown here step by step, aiming at a Warp port
-of the anisotropic phase-field plate. The root numpy project stays the reference that every Warp
-result is checked against.
+of the anisotropic phase-field plate. The serial numpy project in `../serial_py/` stays the
+reference that every Warp result is checked against.
 
 ## Drivers
 
 | Driver | Backbone | What it runs |
 |---|---|---|
-| `CopperTaylorImpact.py` | numpy (`src/solver1.py`) | Copper Taylor bar, MUSL, Johnson-Cook + Mie-Grüneisen, linear hat basis. Reference, frozen. |
 | `CopperTaylorImpact_warp.py` | Warp (`src/warp_*.py`) | Elastic copper Taylor bar, USL with FLIP/PIC blend, Hencky elasticity, cpGIMP basis, rigid wall. |
 
 Run from this directory, in the `pepaenv` env:
@@ -23,9 +22,11 @@ steps (not every step).
 
 ## Layout
 
-- `src/` — the backbone: the frozen numpy routines and the Warp routines (`warp_*.py`).
+- `src/` — the backbone: the Warp routines (`warp_*.py`) and the numpy setup/output helpers the
+  Warp drivers use (mesh, particles, basis, quadrature, phase-field parameters, VTK, plots).
 - `docs/parallel.md` — how the Warp code is written (device state, float32, atomics, kernels).
-- `docs/musl-ep-algorithm.md` — the MUSL elasto-plastic algorithm of the numpy reference.
+- `docs/musl-ep-algorithm.md` — the MUSL elasto-plastic algorithm (Johnson-Cook +
+  Mie-Grüneisen) of the former numpy Taylor bar, kept as the reference for a Warp plasticity port.
 - `geowarp_clone/` — local, git-ignored reference copy of
   [GeoWarp](https://doi.org/10.1016/j.advengsoft.2025.104072) (MIT), the source of the cpGIMP
   kernels. Not imported.

@@ -1,6 +1,11 @@
 # MPM-PHASE-FIELD
 Implementation of phase field fracture and anisotropy with the material point method (MPM).
 
+The repo holds two self-contained sub-projects:
+
+- [`serial_py/`](serial_py/README.md): the serial numpy implementation, and the reference for everything else.
+- [`WARP/`](WARP/README.md): the GPU port with NVIDIA Warp.
+
 # PHASE FIELD
 ![](screenshots/scaled_pf_split_fracture.png)
 

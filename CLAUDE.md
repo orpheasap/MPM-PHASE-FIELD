@@ -1,20 +1,32 @@
 # MPM_PHASE_FIELD
 
-## Project rules
+## Layout
 
-### `src/` is an additive backbone
+The repo holds two self-contained sub-projects, each with its own backbone (`src/`), drivers,
+tests, `CLAUDE.md` and `README.md`:
 
-`src/` is the backbone library: reusable routines only. Changes to it must be **purely additive**.
-Every existing driver at the repo root (`pre_noched_plate_PF.py`, `pre_noched_plate_el.py`,
-`pre_noched_plate_PF_aniso_layer.py`, `Yvonnet_plate.py`, `resume*.py`, `_aniso_main_test.py`, …)
-must keep running unchanged — including drivers written before a new feature existed.
+- **`serial_py/`** — the serial numpy MPM project, and the reference every GPU result is checked
+  against. Rules in `serial_py/CLAUDE.md`; read it before touching anything under `serial_py/`.
+- **`WARP/`** — the GPU (NVIDIA Warp) staging ground. Rules in `WARP/CLAUDE.md`; read it before
+  touching anything under `WARP/`. See `docs/adr/0001-warp-is-a-gpu-staging-ground.md`.
 
-The reason is reproducibility: old simulation scripts must stay runnable indefinitely, while new
-capabilities accumulate in `src/` as options rather than replacements.
+Neither imports from the other: `serial_py/` never imports from `WARP/`, and `WARP/` never imports
+from `serial_py/src/` (a helper it needs is copied into `WARP/src/`). Both sub-projects use the
+package name `src`, so run each test suite from inside its own directory, never one `pytest` over
+the whole repo.
 
-When adding a capability, create a new module in `src/` (or new functions in an existing one) and
-leave existing signatures and behaviour untouched — `git diff HEAD -- src/` should show no changes
-to pre-existing functions. Then edit only the specific driver(s) named in the request.
+Shared across both, at the repo root: `CONTEXT.md` (the glossary), `docs/` (ADRs and agent docs),
+`.scratch/` (issues), `README.md` and `screenshots/`.
+
+## Project rules (both sub-projects)
+
+### Backbones are additive
+
+A sub-project's `src/` is its backbone library: reusable routines only. Once frozen, changes to it
+must be **purely additive**, and every existing driver must keep running unchanged — including
+drivers written before a new feature existed. The reason is reproducibility: old simulation scripts
+must stay runnable indefinitely, while new capabilities accumulate in `src/` as options rather than
+replacements. The details (what is frozen, and since when) are in each sub-project's `CLAUDE.md`.
 
 ### Drivers hard-code their choices
 
@@ -22,13 +34,12 @@ The scripts *outside* `src/` are the applications, and they pick which backbone 
 hard-coding them. Do not add runtime flags, basis selectors, or config switches so a driver can
 choose at run time — switching is done by editing the driver.
 
-### `WARP/` is a separate sub-project
+### Drivers run from their own directory
 
-`WARP/` is the GPU (NVIDIA Warp) staging ground, with its own backbone in `WARP/src/` and its own
-drivers in `WARP/`. The rules above cover the root `src/` and root drivers only; `WARP/` has its
-own rules in `WARP/CLAUDE.md` — read it before touching anything under `WARP/`. Root code never
-imports from `WARP/`, and `WARP/` never imports from the root `src/`. See
-`docs/adr/0001-warp-is-a-gpu-staging-ground.md`.
+Drivers are run with their sub-project directory as the working directory
+(`cd serial_py; python pre_noched_plate_PF.py`). Output and checkpoint paths such as
+`vtk_output_Yvonnet/checkpoint.npz` are relative to the working directory, so the `resume*.py`
+drivers only find their checkpoints when run from there.
 
 ## Agent skills
 
