@@ -109,6 +109,33 @@ The running maximum, over a particle's past, of its undamaged elastic energy den
 what drives bulk damage, and because it never decreases, unloading cannot heal a crack.
 _Avoid_: H, driving force, psi-plus
 
+### Plasticity
+
+**Plastic strain**:
+The part of a particle's strain that is permanent — what would remain if the stress were
+removed. The total strain is split into an elastic part, which alone carries stress and stored
+energy, and this plastic part, which neither stores energy nor drives damage. It changes volume
+not at all.
+_Avoid_: permanent strain, inelastic strain
+_Not to be confused with_: equivalent plastic strain, which is a scalar measure of how much
+plastic flow has accumulated, not the strain itself.
+
+**Equivalent plastic strain**:
+The scalar running total of plastic flow at a particle: it only ever grows, whatever direction
+the plastic strain moves in, and it is what sets how far the yield stress has risen.
+_Avoid_: accumulated plastic strain, p, PEEQ
+
+**Yield stress**:
+The equivalent stress at which an intact, never-yielded particle first flows plastically.
+Yielding is judged on the undegraded (effective) stress, so bulk damage does not move the
+yield point.
+_Avoid_: sigma_y, flow stress
+
+**Hardening modulus**:
+The rate at which the yield stress rises with equivalent plastic strain — linear isotropic
+hardening, the same in every direction.
+_Avoid_: H (the history field already owns that letter), plastic modulus, tangent modulus
+
 ### Energy accounting
 
 **Crack surface energy**:
@@ -131,9 +158,18 @@ recovered from a snapshot of the fields.
 _Avoid_: dissipated energy, damping energy, numerical dissipation
 _Not to be confused with_: crack surface energy.
 
+**Plastic work**:
+The work the stress does on the plastic strain, summed over the run. It lumps together the part
+of plastic flow that is dissipated as heat and the part locked into hardening; neither comes
+back as elastic energy. Like viscous dissipation it accumulates over time and cannot be read
+from a snapshot of the fields.
+_Avoid_: plastic dissipation, plastic energy
+_Not to be confused with_: viscous dissipation, which belongs to the damage fields, not to the
+deformation.
+
 **Energy budget**:
-The named set of terms — kinetic, stored elastic, the crack surface energies, and viscous
-dissipation — that is weighed against the work done by the applied loads. The comparison is a
+The named set of terms — kinetic, stored elastic, the crack surface energies, viscous
+dissipation and, in an elastoplastic run, plastic work — that is weighed against the work done by the applied loads. The comparison is a
 drift diagnostic rather than a conservation law: the model deliberately contains steps that
 neither store nor account for energy, so the budget is expected to miss, and it is the *size*
 of the miss that carries the information.

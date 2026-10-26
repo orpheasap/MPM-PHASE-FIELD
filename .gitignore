@@ -10,6 +10,8 @@ desktop.ini
 vtk_output*/
 *.csv
 
+WARP/plastic_aniso_layer_PF_MPM_explicit.tex
+WARP/plastic_aniso_layer_PF_MPM_explicit.pdf
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
