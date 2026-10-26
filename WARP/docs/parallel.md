@@ -59,6 +59,13 @@ tests compare with tolerances, never with equality.
   F^d and F^α; writes both crack surface energies), `grid_update_aniso`, `g2p_aniso`, the
   total-strain `stress_update_aniso` (σ₀ = C_a(α) : ε recomputed each step), and the
   `run_warp_aniso_solver` time loop.
+- `warp_usl_aniso_plast.py` — the elastoplastic Yvonnet plate: plane-stress J2 plasticity with
+  linear isotropic hardening on the effective stress. The `plane_stress_return` `@wp.func` (a
+  closest-point return with the full C_a(α), Newton on the plastic multiplier, fixed iteration
+  cap), the `stress_update_aniso_plast` kernel (plastic strain, equivalent plastic strain,
+  elastic strain εe, per-step plastic work and maximum equivalent plastic strain on the
+  device), and the `run_warp_aniso_plast_solver` time loop. Every other step kernel is imported unchanged from
+  `warp_usl_aniso.py`; `damage_residual_two_field` is fed εe in place of ε.
 - `phasefield.py` — host-side phase-field constants, copied from `serial_py/src/phasefield.py`.
 
 New capabilities arrive as new `warp_*.py` modules or new functions (after the freeze, see
